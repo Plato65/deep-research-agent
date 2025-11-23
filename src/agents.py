@@ -595,14 +595,40 @@ class ReportWriter:
         
     async def write_report(self, state: ResearchState) -> dict:
         """Write the final research report with validation and retry.
-        
+
         Returns dict with report data that LangGraph will merge into state.
         """
         logger.info("Writing final report")
-        
+
         if not state.plan or not state.key_findings:
             return {"error": "Insufficient data for report generation"}
-        
+
+        # CREATE MASTER SOURCE LIST FIRST - prevents citation numbering mismatches
+        # Build a single numbered source list that ALL sections will use
+        master_sources = []
+        master_source_info = []  # For References section
+        seen_urls = set()
+
+        if state.search_results:
+            for i, result in enumerate(state.search_results[:20]):  # Top 20 sources
+                if hasattr(result, 'url') and result.url and result.url not in seen_urls:
+                    seen_urls.add(result.url)
+                    master_sources.append(result)
+                    # Store info for References section
+                    title = getattr(result, 'title', '')
+                    cred_info = state.credibility_scores[i] if state.credibility_scores and i < len(state.credibility_scores) else {}
+                    date = ''
+                    if 'recency' in cred_info and 'date' in cred_info['recency']:
+                        date = cred_info['recency']['date']
+                    master_source_info.append({
+                        'url': result.url,
+                        'title': title,
+                        'date': date,
+                        'number': len(master_sources)  # 1-indexed
+                    })
+
+        logger.info(f"Created master source list with {len(master_sources)} sources for consistent citation numbering")
+
         # Track total LLM calls for report generation
         report_llm_calls = 0
         report_input_tokens = 0
@@ -611,14 +637,14 @@ class ReportWriter:
         
         for attempt in range(self.max_retries):
             try:
-                # Generate each section with retry
+                # Generate each section with retry - using MASTER source list for consistency
                 report_sections = []
                 for section_title in state.plan.report_outline:
                     section, section_tokens = await self._write_section(
                         state.research_topic,
                         section_title,
                         state.key_findings,
-                        state.search_results
+                        master_sources  # Use master list so all sections have same numbering
                     )
                     if section:
                         report_sections.append(section)
@@ -638,9 +664,9 @@ class ReportWriter:
                     plan=state.plan,
                     report_sections=report_sections
                 )
-                
-                # Compile final report
-                final_report = self._compile_report(temp_state)
+
+                # Compile final report with master source list for consistent References
+                final_report = self._compile_report(temp_state, master_source_info)
                 
                 # Format citations in specified style with dates
                 if state.search_results:
@@ -720,12 +746,19 @@ Requirements:
 - Use markdown formatting
 - Be objective and balanced
 
-CRITICAL CITATION RULES:
-1. You will be provided with a numbered list of sources
-2. Use inline citations [1], [2], etc. to reference these sources by their assigned numbers
-3. ONLY cite sources from the provided list - never make up or hallucinate sources
-4. DO NOT write out URLs or create a References section (this will be handled separately)
-5. Ensure every factual claim is properly cited with the appropriate source number
+CRITICAL CITATION RULES - CITATION INTEGRITY IS PARAMOUNT:
+1. You will be provided with a FIXED numbered list of sources (e.g., [1] through [15])
+2. Use inline citations [1], [2], etc. ONLY for sources in the provided list
+3. NEVER cite a source number that doesn't exist in the list (e.g., if list goes to [15], don't cite [16], [17], [19])
+4. NEVER make up, invent, or hallucinate source numbers
+5. DO NOT write out URLs or create a References section (handled separately)
+6. If you can't find a source for a claim, either:
+   - Find it in the provided sources, OR
+   - Omit the claim, OR
+   - State it as general knowledge without citation
+7. Every numbered citation MUST correspond to an actual source in the provided list
+
+VIOLATION OF THESE RULES SEVERELY DAMAGES REPORT CREDIBILITY.
 
 You may use validate_section_quality to check your work before finalizing."""
         
@@ -739,6 +772,9 @@ You may use validate_section_quality to check your work before finalizing."""
         try:
             start_time = time.time()
             
+            # Count actual sources provided
+            num_sources = min(len(search_results), 20)
+
             # Prepare input message
             input_message = f"""Research Topic: {topic}
 Section Title: {section_title}
@@ -751,14 +787,17 @@ AVAILABLE SOURCES (cite these by number - references will be added at the end):
 {chr(10).join(f"[{i+1}] {r.title}" + chr(10) + f"    URL: {r.url}" + chr(10) + f"    Snippet: {r.snippet[:200]}..." for i, r in enumerate(search_results[:20]))}
 
 CRITICAL INSTRUCTIONS FOR CITATIONS:
-1. Use inline citations [1], [2], [3], etc. to reference the numbered sources above
-2. ONLY cite sources from the list above - use their assigned numbers
-3. DO NOT include a References section in your output (it will be added later)
-4. DO NOT write out full URLs in the text
-5. Make sure to cite specific claims with appropriate source numbers
-6. Focus on synthesizing information from the most relevant and credible sources
+1. The source list above contains sources numbered [1] through [{num_sources}]
+2. You MAY ONLY cite sources [1] through [{num_sources}] - these are the ONLY valid citation numbers
+3. NEVER cite source numbers higher than [{num_sources}] (e.g., don't cite [19] if list only goes to [15])
+4. DO NOT include a References section in your output (it will be added later)
+5. DO NOT write out full URLs in the text
+6. Every citation number MUST match a source in the list above
+7. If you need a fact not in the sources, either omit it or state it without citation
 
-Write a comprehensive, well-researched section using inline citations [1], [2], etc."""
+REMINDER: Your citation numbers MUST be between [1] and [{num_sources}]. Any number outside this range is INVALID.
+
+Write a comprehensive, well-researched section using inline citations [1] through [{num_sources}] ONLY."""
             
             # Estimate input tokens
             input_tokens = estimate_tokens(input_message)
@@ -824,24 +863,20 @@ Write a comprehensive, well-researched section using inline citations [1], [2], 
             logger.error(f"Error writing section '{section_title}': {str(e)}")
             return None, None
     
-    def _compile_report(self, state: ResearchState) -> str:
-        """Compile all sections into final report."""
-        # Count actual sources from search results
-        search_results = getattr(state, 'search_results', []) or []
+    def _compile_report(self, state: ResearchState, master_source_info: list = None) -> str:
+        """Compile all sections into final report with consistent source numbering.
+
+        Args:
+            state: Research state with sections
+            master_source_info: Pre-built master source list with numbering
+
+        Returns:
+            Compiled report with consistent citations
+        """
         report_sections = getattr(state, 'report_sections', []) or []
-        
-        # Get unique URLs from search results
-        unique_sources = set()
-        for result in search_results:
-            if hasattr(result, 'url') and result.url:
-                unique_sources.add(result.url)
-        
-        # Also collect from report sections if they have sources
-        for section in report_sections:
-            if hasattr(section, 'sources'):
-                unique_sources.update(section.sources)
-        
-        source_count = len(unique_sources) if unique_sources else len(search_results)
+
+        # Use master source info for accurate count
+        source_count = len(master_source_info) if master_source_info else 0
         
         report_parts = [
             f"# {state.research_topic}\n",
@@ -878,38 +913,26 @@ Write a comprehensive, well-researched section using inline citations [1], [2], 
                 report_parts.append(content)
                 report_parts.append("\n")
         
-        # Only add references if not already present in sections
+        # Add References section using master_source_info for consistent numbering
         if not has_references_section:
-            # Add references from search results
             report_parts.append("\n---\n\n## References\n\n")
-        
-        # Build a list of (url, title) tuples from search results
-        source_info = []
-        seen_urls = set()
-        
-        for result in search_results:
-            if hasattr(result, 'url') and result.url and result.url not in seen_urls:
-                seen_urls.add(result.url)
-                title = getattr(result, 'title', '')
-                source_info.append((result.url, title))
-        
-        # Add sources from sections if available (if not already included)
-        for section in report_sections:
-            if hasattr(section, 'sources'):
-                for url in section.sources:
-                    if url not in seen_urls:
-                        seen_urls.add(url)
-                        source_info.append((url, ''))
-        
-        # Add formatted references (only once, outside the loop)
-        if not has_references_section:
-            if source_info:
+
+            if master_source_info:
                 from src.utils.citations import CitationFormatter
                 formatter = CitationFormatter()
-                for i, (url, title) in enumerate(source_info[:30], 1):  # Top 30 sources
-                    # Format citation in APA style
-                    citation = formatter.format_apa(url, title)
-                    report_parts.append(f"{i}. {citation}\n")
+
+                # Use master_source_info which has pre-assigned numbers matching text citations
+                for source in master_source_info:
+                    num = source['number']
+                    url = source['url']
+                    title = source['title']
+                    date = source['date']
+
+                    # Format citation with date if available
+                    citation = formatter.format_apa(url, title, date=date)
+                    report_parts.append(f"{num}. {citation}\n")
+
+                logger.info(f"Added {len(master_source_info)} references with consistent numbering")
             else:
                 report_parts.append("*No sources were available for this research.*\n")
         
