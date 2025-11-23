@@ -121,15 +121,27 @@ class ContentExtractor:
     
     def extract_content(self, url: str) -> Optional[str]:
         """Extract main content from a URL.
-        
+
         Args:
             url: URL to extract content from
-            
+
         Returns:
             Optional[str]: Extracted content or None if extraction fails
         """
         try:
-            logger.info(f"Extracting content from: {url}")
+            # Validate URL
+            from src.utils.validation import is_safe_url, validate_url
+
+            is_valid, clean_url, error_msg = validate_url(url)
+            if not is_valid:
+                logger.error(f"Invalid URL: {error_msg}")
+                return None
+
+            if not is_safe_url(clean_url):
+                logger.error(f"Unsafe URL blocked: {clean_url}")
+                return None
+
+            logger.info(f"Extracting content from: {clean_url}")
             
             response = requests.get(
                 url,

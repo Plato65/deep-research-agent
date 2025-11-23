@@ -21,48 +21,88 @@ _citation_formatter = CitationFormatter()
 
 
 @tool
-async def web_search(query: str, max_results: int = None) -> List[dict]:
-    """Search the web for information using DuckDuckGo search engine.
-    
-    This tool allows you to search the internet for current information, articles, 
-    research papers, news, and any publicly available content. Use this when you need 
-    to gather information, verify facts, find sources, or research any topic.
-    
+async def web_search(query: str, max_results: int = None, include_specialized: bool = True) -> List[dict]:
+    """Search the web for information using multiple search engines and specialized sources.
+
+    This tool searches across:
+    - General web (DuckDuckGo)
+    - Academic papers (arXiv, SSRN) - if enabled
+    - Tech discussions (Hacker News) - if enabled
+    - Community discussions (Reddit) - if enabled
+    - Consulting reports (McKinsey, BCG, etc.) - if enabled
+
+    The tool automatically aggregates results from all enabled sources and removes duplicates.
+
     Best practices:
     - Use specific, targeted queries for better results
     - Include key terms and relevant keywords
     - For academic topics, include terms like "research", "study", or "paper"
     - For news, include year or recent timeframes
     - Avoid overly broad queries - be specific
-    
+
     Args:
         query: The search query string. Should be clear and specific.
-               Examples: "climate change effects 2024", "machine learning best practices",
-               "renewable energy trends research"
-        max_results: Maximum number of search results to return (default: from config, max: 10)
-        
+               Examples: "AI automation impact on jobs", "future of work research",
+               "machine learning business applications"
+        max_results: Maximum number of search results to return (default: from config)
+        include_specialized: Whether to include specialized sources (default: True)
+
     Returns:
         List of dictionaries, each containing:
         - query (str): The original search query used
         - title (str): Title of the web page or article
         - url (str): Full URL to the source
-        - snippet (str): Preview text/summary from the page (100-200 chars)
-        
+        - snippet (str): Preview text/summary from the page
+
     Example:
-        results = await web_search("artificial intelligence applications healthcare")
-        # Returns list of relevant articles about AI in healthcare
+        results = await web_search("artificial intelligence future of work")
+        # Returns list from general web + arXiv papers + HN discussions + consulting reports
     """
     try:
         # Use config value if not specified
         if max_results is None:
             max_results = config.max_search_results_per_query
-            
-        # Update max_results if different
+
+        all_results = []
+
+        # Standard web search (DuckDuckGo)
         if _search_impl.max_results != max_results:
             _search_impl.max_results = max_results
-            
-        results = await _search_impl.search_async(query)
-        
+
+        standard_results = await _search_impl.search_async(query)
+        all_results.extend(standard_results)
+
+        # Specialized searches (if enabled)
+        if include_specialized:
+            try:
+                from src.utils.specialized_search import AggregatedSearchTool
+
+                specialized_tool = AggregatedSearchTool()
+
+                # Get combined specialized results (deduplicated)
+                specialized_results = await specialized_tool.search_combined(
+                    query,
+                    max_total_results=max_results
+                )
+
+                all_results.extend(specialized_results)
+
+            except Exception as e:
+                logger.warning(f"Specialized search failed (continuing with standard results): {e}")
+
+        # Deduplicate by URL
+        seen_urls = set()
+        unique_results = []
+        for result in all_results:
+            if result.url not in seen_urls:
+                seen_urls.add(result.url)
+                unique_results.append(result)
+
+        # Limit to max_results
+        unique_results = unique_results[:max_results * 2]  # Allow 2x for diversity
+
+        logger.info(f"Web search returned {len(unique_results)} results ({len(standard_results)} standard, {len(all_results) - len(standard_results)} specialized)")
+
         # Convert SearchResult objects to dicts for LLM consumption
         return [
             {
@@ -71,7 +111,7 @@ async def web_search(query: str, max_results: int = None) -> List[dict]:
                 "url": r.url,
                 "snippet": r.snippet
             }
-            for r in results
+            for r in unique_results
         ]
     except Exception as e:
         logger.error(f"Web search tool error: {str(e)}")

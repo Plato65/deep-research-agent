@@ -299,57 +299,10 @@ Begin your research. Use the tools to gather comprehensive information."""
                 
                 output_tokens = estimate_tokens(output_text)
                 
-                # Extract search results from messages
-                # We need to track tool calls and results within the messages
-                search_results = []
-                from src.state import SearchResult
-                
-                for msg in messages:
-                    # Check for tool calls in message
-                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                        for tool_call in msg.tool_calls:
-                            if tool_call.get('name') == 'web_search':
-                                # This is a search request, we'll get results in next message
-                                pass
-                    
-                    # Check for tool responses
-                    if hasattr(msg, 'name') and msg.name == 'web_search':
-                        # Parse tool response
-                        try:
-                            content = msg.content
-                            if isinstance(content, str):
-                                import json
-                                tool_results = json.loads(content)
-                            else:
-                                tool_results = content
-                            
-                            if isinstance(tool_results, list):
-                                for item in tool_results:
-                                    if isinstance(item, dict):
-                                        search_results.append(SearchResult(
-                                            query=item.get('query', ''),
-                                            title=item.get('title', ''),
-                                            url=item.get('url', ''),
-                                            snippet=item.get('snippet', ''),
-                                            content=None
-                                        ))
-                        except Exception as e:
-                            logger.warning(f"Error parsing tool result: {e}")
-                    
-                    # Check for content extraction results
-                    if hasattr(msg, 'name') and msg.name == 'extract_webpage_content':
-                        try:
-                            content = msg.content
-                            # Find the corresponding search result and update it
-                            # Note: This is a simplified approach, might need refinement
-                            if search_results and content:
-                                # Update the most recent search result without content
-                                for sr in reversed(search_results):
-                                    if not sr.content:
-                                        sr.content = content
-                                        break
-                        except Exception as e:
-                            logger.warning(f"Error updating content: {e}")
+                # Extract search results from messages using robust parser
+                from src.utils.result_parser import parse_search_results
+
+                search_results = parse_search_results(messages)
                 
                 logger.info(f"Autonomous agent collected {len(search_results)} results")
                 
@@ -513,12 +466,11 @@ Please analyze these search results and extract key findings. You may use the ex
                 # Track LLM call
                 duration = time.time() - start_time
                 
-                # Extract final response
+                # Extract final response using robust parser
+                from src.utils.result_parser import extract_final_answer
+
                 messages = result.get('messages', [])
-                output_text = ""
-                if messages:
-                    last_msg = messages[-1]
-                    output_text = str(last_msg.content if hasattr(last_msg, 'content') else str(last_msg))
+                output_text = extract_final_answer(messages) or ""
                 
                 output_tokens = estimate_tokens(output_text)
                 

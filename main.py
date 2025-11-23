@@ -32,10 +32,23 @@ async def main():
         print("\nDeep Research Agent")
         print("=" * 50)
         topic = input("\nEnter your research topic: ").strip()
-    
+
     if not topic:
         logger.error("No research topic provided")
         sys.exit(1)
+
+    # Validate and sanitize topic
+    from src.utils.validation import validate_topic
+    is_valid, sanitized_topic, error_msg = validate_topic(topic)
+
+    if not is_valid:
+        logger.error(f"Invalid research topic: {error_msg}")
+        print(f"\n[ERROR] {error_msg}")
+        sys.exit(1)
+
+    if sanitized_topic != topic:
+        logger.info(f"Topic sanitized: '{topic}' -> '{sanitized_topic}'")
+        topic = sanitized_topic
     
     print(f"\n[INFO] Starting deep research on: {topic}\n")
     print("This may take several minutes. Please wait...\n")
