@@ -104,6 +104,21 @@ Your plan should include:
    - Include "[topic] recent research", "[topic] this year"
    - For weekly monitoring, add "[topic] this month", "[topic] this week"
 
+   CRITICAL FOR SPECIFICITY - Find CONCRETE facts, not generic analysis:
+   - Target AUTHORITATIVE sources: "BLS [topic]", "McKinsey report [topic] 2024"
+   - Look for QUANTITATIVE data: "[topic] statistics 2024", "[topic] job losses numbers", "[topic] growth rate"
+   - Find SPECIFIC events: "[topic] layoffs November 2024", "[topic] company announcements 2024"
+   - Seek PROFESSIONAL analysis: "Brookings [topic]", "Pew Research [topic]", "[topic] economic impact"
+
+   DOMAIN PRIORITIES (these give better results than arxiv):
+   - Labor data: "Bureau of Labor Statistics", "unemployment rate", "job openings data"
+   - Industry reports: "McKinsey", "BCG", "Deloitte insights", "Gartner analysis"
+   - Business news: "Reuters [topic]", "Bloomberg [topic]", "WSJ [topic] 2024"
+   - Think tanks: "Brookings Institution", "RAND Corporation", "Pew Research Center"
+   - Company data: "[company name] layoffs 2024", "[company name] hiring AI"
+
+   AVOID vague queries that return irrelevant academic papers
+
 3. An outline for the final report (up to {max_sections} sections)
 
 Be strategic and thorough. The search queries will be used by an autonomous agent that can:
@@ -111,7 +126,7 @@ Be strategic and thorough. The search queries will be used by an autonomous agen
 - Extract full content from web pages
 - Gather information iteratively
 
-Design your queries to maximize information gathering, with emphasis on RECENT content."""),
+Design your queries to maximize information gathering, with emphasis on RECENT, SPECIFIC, QUANTITATIVE content from AUTHORITATIVE sources."""),
             ("human", """Research Topic: {topic}
 
 Create a detailed research plan in JSON format:
@@ -745,6 +760,14 @@ Requirements:
 - Cite sources using inline citations [1], [2], [3], etc.
 - Use markdown formatting
 - Be objective and balanced
+
+CRITICAL SPECIFICITY REQUIREMENTS - NO GENERIC CONTENT:
+1. Include CONCRETE facts: dates, numbers, percentages, company names, specific events
+2. BAD: "Recent layoffs in tech companies" GOOD: "Google laid off 12,000 in January 2024 [1]"
+3. BAD: "AI is transforming jobs" GOOD: "BLS reports 4.7% unemployment in tech sector, down from 5.2% in Q3 2024 [3]"
+4. EVERY major claim needs: WHO (company/org), WHAT (specific action), WHEN (exact date), HOW MUCH (numbers)
+5. If sources don't provide specific facts, DON'T write generic statements - skip that point
+6. Generic knowledge without citations is UNACCEPTABLE - use sources or nothing
 
 CRITICAL CITATION RULES - CITATION INTEGRITY IS PARAMOUNT:
 1. You will be provided with a FIXED numbered list of sources (e.g., [1] through [15])
