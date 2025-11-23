@@ -690,10 +690,17 @@ You have access to:
 Requirements:
 - Minimum {min_words} words
 - Use clear, academic language
-- Include specific facts and data
-- Cite sources using [1], [2], etc.
+- Include specific facts and data from the provided sources
+- Cite sources using inline citations [1], [2], [3], etc.
 - Use markdown formatting
 - Be objective and balanced
+
+CRITICAL CITATION RULES:
+1. You will be provided with a numbered list of sources
+2. Use inline citations [1], [2], etc. to reference these sources by their assigned numbers
+3. ONLY cite sources from the provided list - never make up or hallucinate sources
+4. DO NOT write out URLs or create a References section (this will be handled separately)
+5. Ensure every factual claim is properly cited with the appropriate source number
 
 You may use validate_section_quality to check your work before finalizing."""
         
@@ -715,7 +722,18 @@ Minimum Words: {config.min_section_words}
 Key Findings:
 {chr(10).join(f"- {f}" for f in findings)}
 
-Please write this section in markdown format. Use inline citations [1], [2], etc. to reference sources."""
+AVAILABLE SOURCES (cite these by number - references will be added at the end):
+{chr(10).join(f"[{i+1}] {r.title}" + chr(10) + f"    URL: {r.url}" + chr(10) + f"    Snippet: {r.snippet[:200]}..." for i, r in enumerate(search_results[:20]))}
+
+CRITICAL INSTRUCTIONS FOR CITATIONS:
+1. Use inline citations [1], [2], [3], etc. to reference the numbered sources above
+2. ONLY cite sources from the list above - use their assigned numbers
+3. DO NOT include a References section in your output (it will be added later)
+4. DO NOT write out full URLs in the text
+5. Make sure to cite specific claims with appropriate source numbers
+6. Focus on synthesizing information from the most relevant and credible sources
+
+Write a comprehensive, well-researched section using inline citations [1], [2], etc."""
             
             # Estimate input tokens
             input_tokens = estimate_tokens(input_message)
