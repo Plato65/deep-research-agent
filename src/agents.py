@@ -334,10 +334,15 @@ Begin your research. Use the tools to gather comprehensive information."""
                 # Score all results first
                 scored_results = self.credibility_scorer.score_search_results(search_results)
 
+                # Extract topic keywords for relevance filtering
+                topic_keywords = self._extract_topic_keywords(state.research_topic)
+                logger.info(f"Topic keywords for relevance filtering: {topic_keywords}")
+
                 # Filter by credibility score, age, and topic relevance
                 filtered_scored = []
                 age_filtered_count = 0
                 relevance_filtered_count = 0
+                homepage_filtered_count = 0
 
                 for item in scored_results:
                     result = item['result']
@@ -347,24 +352,23 @@ Begin your research. Use the tools to gather comprehensive information."""
                     if cred['score'] < config.min_credibility_score:
                         continue
 
-                    # Check topic relevance - filter out arxiv papers on unrelated topics
-                    if hasattr(result, 'url') and hasattr(result, 'title'):
-                        if 'arxiv.org' in result.url.lower():
-                            title_lower = result.title.lower()
-                            # Topics clearly unrelated to job/employment/automation/AI workforce
-                            irrelevant_keywords = [
-                                'image processing', 'super-resolution', 'compression',
-                                'linguistics', 'spanish', 'historical', 'language model',
-                                'physics', 'quantum', 'particle', 'vertex', 'triangle',
-                                'chemistry', 'molecular', 'protein',
-                                'voice privacy', 'audio', 'speech recognition',
-                                'multiprocessor scheduling', 'algorithms',
-                                'building permit', 'construction',
-                            ]
-                            if any(keyword in title_lower for keyword in irrelevant_keywords):
-                                relevance_filtered_count += 1
-                                logger.debug(f"Filtered irrelevant arxiv paper: {result.title}")
-                                continue
+                    # Check for generic homepages (no specific content path)
+                    if hasattr(result, 'url'):
+                        if self._is_generic_homepage(result.url):
+                            homepage_filtered_count += 1
+                            logger.debug(f"Filtered generic homepage: {result.url}")
+                            continue
+
+                    # POSITIVE FILTERING: Check topic relevance for ALL sources
+                    # Require sources to contain keywords related to the research topic
+                    if hasattr(result, 'title'):
+                        title = getattr(result, 'title', '')
+                        snippet = getattr(result, 'snippet', '')
+
+                        if not self._is_source_relevant(title, snippet, topic_keywords):
+                            relevance_filtered_count += 1
+                            logger.debug(f"Filtered irrelevant source: {title[:100]}")
+                            continue
 
                     # Check age if filtering is enabled
                     if config.max_source_age_days > 0 and 'recency' in cred:
@@ -385,7 +389,7 @@ Begin your research. Use the tools to gather comprehensive information."""
 
                 logger.info(f"Filtered {len(search_results)} -> {len(sorted_results)} results "
                            f"(min_credibility={config.min_credibility_score}, age_filtered={age_filtered_count}, "
-                           f"relevance_filtered={relevance_filtered_count})")
+                           f"relevance_filtered={relevance_filtered_count}, homepage_filtered={homepage_filtered_count})")
                 
                 # Mark queries as completed
                 for q in state.plan.search_queries:
@@ -432,6 +436,148 @@ Begin your research. Use the tools to gather comprehensive information."""
             "error": "Search failed: Maximum retries exceeded",
             "iterations": state.iterations + 1
         }
+
+    def _extract_topic_keywords(self, research_topic: str) -> List[str]:
+        """Extract keywords from research topic for relevance filtering.
+
+        Args:
+            research_topic: The research topic string
+
+        Returns:
+            List of keywords extracted from the topic
+        """
+        # Convert to lowercase for matching
+        topic_lower = research_topic.lower()
+
+        # Split into words and filter out common stop words
+        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+                      'of', 'with', 'by', 'from', 'as', 'is', 'are', 'was', 'were', 'be',
+                      'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+                      'would', 'should', 'could', 'may', 'might', 'must', 'can', 'this',
+                      'that', 'these', 'those', 'what', 'how', 'when', 'where', 'why'}
+
+        # Extract words (minimum 3 characters)
+        words = [w.strip('.,!?;:()[]{}"\'-') for w in topic_lower.split()]
+        keywords = [w for w in words if len(w) >= 3 and w not in stop_words]
+
+        # Also add common variations and related terms based on key topics
+        # This helps catch relevant sources that use different terminology
+        expanded_keywords = set(keywords)
+
+        # If topic mentions AI/automation, add related terms
+        if any(term in topic_lower for term in ['ai', 'artificial intelligence', 'automation', 'machine learning']):
+            expanded_keywords.update(['ai', 'artificial', 'intelligence', 'automation', 'machine', 'learning',
+                                     'algorithm', 'robot', 'automated', 'neural', 'deep learning'])
+
+        # If topic mentions jobs/employment, add related terms
+        if any(term in topic_lower for term in ['job', 'employment', 'work', 'career', 'labor', 'workforce']):
+            expanded_keywords.update(['job', 'jobs', 'employment', 'work', 'worker', 'workers', 'career',
+                                     'labor', 'labour', 'workforce', 'hiring', 'layoff', 'layoffs',
+                                     'unemployment', 'occupation', 'wage', 'salary', 'employee', 'employer'])
+
+        # If topic mentions market/economy, add related terms
+        if any(term in topic_lower for term in ['market', 'economy', 'economic', 'business', 'industry']):
+            expanded_keywords.update(['market', 'economy', 'economic', 'business', 'industry', 'sector',
+                                     'commercial', 'trade', 'financial', 'corporate'])
+
+        # If topic mentions impact/effect/change, add related terms
+        if any(term in topic_lower for term in ['impact', 'effect', 'change', 'transform', 'disrupt']):
+            expanded_keywords.update(['impact', 'effect', 'affect', 'change', 'changing', 'transform',
+                                     'transformation', 'disrupt', 'disruption', 'shift'])
+
+        return list(expanded_keywords)
+
+    def _is_source_relevant(self, title: str, snippet: str, topic_keywords: List[str]) -> bool:
+        """Check if a source is relevant to the research topic.
+
+        Uses positive filtering - requires sources to contain topic-related keywords.
+
+        Args:
+            title: Source title
+            snippet: Source snippet/description
+            topic_keywords: List of keywords related to the topic
+
+        Returns:
+            True if source is relevant, False otherwise
+        """
+        if not title and not snippet:
+            return False
+
+        # Combine title and snippet for checking
+        combined_text = f"{title} {snippet}".lower()
+
+        # Count how many topic keywords appear in the source
+        keyword_matches = sum(1 for keyword in topic_keywords if keyword in combined_text)
+
+        # Require at least 2 keyword matches for relevance
+        # This prevents false positives while catching relevant sources
+        # Exception: Very specific keywords count as 1 match
+        specific_keywords = ['unemployment', 'layoff', 'layoffs', 'automation', 'workforce',
+                            'employment', 'artificial intelligence', 'machine learning']
+
+        has_specific = any(kw in combined_text for kw in specific_keywords)
+
+        # Source is relevant if:
+        # - Has 2+ general keyword matches, OR
+        # - Has 1+ specific keyword match
+        is_relevant = keyword_matches >= 2 or (keyword_matches >= 1 and has_specific)
+
+        return is_relevant
+
+    def _is_generic_homepage(self, url: str) -> bool:
+        """Check if URL is a generic homepage without specific content.
+
+        Generic homepages are less useful as specific sources.
+
+        Args:
+            url: URL to check
+
+        Returns:
+            True if URL is a generic homepage, False otherwise
+        """
+        from urllib.parse import urlparse
+
+        try:
+            parsed = urlparse(url)
+            path = parsed.path.rstrip('/')
+
+            # Homepage indicators:
+            # 1. No path or just '/' or '/index.*'
+            # 2. Very short paths without substantive content indicators
+            if not path or path in ['', '/'] or path.startswith('/index'):
+                return True
+
+            # Allow specific content paths
+            content_indicators = [
+                '/article', '/blog', '/post', '/news', '/research', '/paper',
+                '/report', '/insight', '/publication', '/study', '/analysis',
+                '/featured', '/press', '/release', '/whitepaper', '/pdf',
+                '/doc', '/archive', '/abs', '/content', '/resources'
+            ]
+
+            # If path contains content indicators, it's specific
+            if any(indicator in path.lower() for indicator in content_indicators):
+                return False
+
+            # Check if path is just a category/section without specific article
+            # e.g., /insights or /reports without a specific slug
+            path_parts = [p for p in path.split('/') if p]
+
+            # If path has only 1-2 parts and doesn't look like a specific article, consider it generic
+            # Specific articles usually have longer paths or identifiable slugs
+            if len(path_parts) <= 1:
+                # Single-level paths like '/insights' or '/reports' are generic
+                generic_sections = ['about', 'insights', 'reports', 'publications', 'resources',
+                                  'news', 'blog', 'research', 'contact', 'careers', 'team']
+                if path_parts and path_parts[0].lower() in generic_sections:
+                    return True
+
+            # If we have a reasonable path with multiple parts, it's probably specific
+            return False
+
+        except Exception as e:
+            logger.debug(f"Error checking if URL is generic homepage: {e}")
+            return False
 
 
 class ResearchSynthesizer:
@@ -792,6 +938,14 @@ CRITICAL SPECIFICITY REQUIREMENTS - NO GENERIC CONTENT:
 4. EVERY major claim needs: WHO (company/org), WHAT (specific action), WHEN (exact date), HOW MUCH (numbers)
 5. If sources don't provide specific facts, DON'T write generic statements - skip that point
 6. Generic knowledge without citations is UNACCEPTABLE - use sources or nothing
+
+CRITICAL SOURCE RELEVANCE RULE - NO FORCED CITATIONS:
+1. ONLY cite sources that are DIRECTLY relevant to the specific claim you're making
+2. DO NOT invent tenuous connections to force irrelevant sources into the narrative
+3. BAD: "Research from the Voice Privacy Challenge highlights AI's privacy protection capabilities [14]" - when writing about job market
+4. GOOD: Simply omit claims that aren't supported by relevant sources
+5. It is BETTER to have fewer citations to highly relevant sources than to force irrelevant sources with invented connections
+6. If a source doesn't directly support a claim about the topic, DON'T use it
 
 CRITICAL CITATION RULES - CITATION INTEGRITY IS PARAMOUNT:
 1. You will be provided with a FIXED numbered list of sources (e.g., [1] through [15])
