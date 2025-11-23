@@ -71,10 +71,16 @@ class WebSearchTool:
                     ))
                     
                     for result in search_results:
+                        url = result.get("href", "")
+                        # Filter out Yandex and other unwanted domains
+                        if any(unwanted in url.lower() for unwanted in ['yandex.', 'yandex.com', 'yandex.ru']):
+                            logger.debug(f"Filtered out unwanted domain: {url}")
+                            continue
+
                         results.append(SearchResult(
                             query=query,
                             title=result.get("title", ""),
-                            url=result.get("href", ""),
+                            url=url,
                             snippet=result.get("body", "")
                         ))
                     

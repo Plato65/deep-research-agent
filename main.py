@@ -85,17 +85,23 @@ async def main():
         if final_state.get("final_report"):
             output_dir = Path("outputs")
             output_dir.mkdir(exist_ok=True)
-            
+
             # Create safe filename
             safe_topic = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in topic)
             safe_topic = safe_topic[:50].strip()
-            
+
             output_file = output_dir / f"{safe_topic}.md"
             final_report = final_state["final_report"]
             output_file.write_text(final_report, encoding='utf-8')
-            
-            print(f"\n[SUCCESS] Report saved to: {output_file}")
-            print(f"          Report length: {len(final_report)} characters")
+
+            # Make output location VERY obvious
+            print("\n" + "=" * 80)
+            print("📄 REPORT SAVED SUCCESSFULLY")
+            print("=" * 80)
+            print(f"\n✓ Location: {output_file.absolute()}")
+            print(f"✓ Filename: {output_file.name}")
+            print(f"✓ Size: {len(final_report):,} characters")
+            print("\n" + "=" * 80)
             
             # Display a preview
             print("\n" + "=" * 80)
