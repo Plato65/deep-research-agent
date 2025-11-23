@@ -97,6 +97,13 @@ Your plan should include:
    - Create diverse queries covering different aspects
    - Include both broad overview queries and specific deep-dive queries
    - Consider current trends, historical context, and future implications
+
+   CRITICAL FOR RECENCY: To get the most recent information:
+   - Include time-bound queries with "2024", "2025", "latest", "recent"
+   - Add queries like "[topic] news 2024", "[topic] latest developments"
+   - Include "[topic] recent research", "[topic] this year"
+   - For weekly monitoring, add "[topic] this month", "[topic] this week"
+
 3. An outline for the final report (up to {max_sections} sections)
 
 Be strategic and thorough. The search queries will be used by an autonomous agent that can:
@@ -104,7 +111,7 @@ Be strategic and thorough. The search queries will be used by an autonomous agen
 - Extract full content from web pages
 - Gather information iteratively
 
-Design your queries to maximize information gathering."""),
+Design your queries to maximize information gathering, with emphasis on RECENT content."""),
             ("human", """Research Topic: {topic}
 
 Create a detailed research plan in JSON format:
@@ -311,18 +318,35 @@ Begin your research. Use the tools to gather comprehensive information."""
             
                 # Score all results first
                 scored_results = self.credibility_scorer.score_search_results(search_results)
-                
-                # Filter by minimum credibility score
-                filtered_scored = [
-                    item for item in scored_results
-                    if item['credibility']['score'] >= config.min_credibility_score
-                ]
-                
+
+                # Filter by credibility score and age
+                filtered_scored = []
+                age_filtered_count = 0
+
+                for item in scored_results:
+                    # Check credibility score
+                    if item['credibility']['score'] < config.min_credibility_score:
+                        continue
+
+                    # Check age if filtering is enabled
+                    if config.max_source_age_days > 0 and 'recency' in item['credibility']:
+                        recency_info = item['credibility']['recency']
+                        age_days = recency_info.get('age_days')
+
+                        # If we have age info and it's too old, skip it
+                        if age_days is not None and age_days > config.max_source_age_days:
+                            age_filtered_count += 1
+                            logger.debug(f"Filtered out source older than {config.max_source_age_days} days: {age_days} days old")
+                            continue
+
+                    filtered_scored.append(item)
+
                 # Extract filtered results and scores (already sorted by score, highest first)
                 credibility_scores = [item['credibility'] for item in filtered_scored]
                 sorted_results = [item['result'] for item in filtered_scored]
-                
-                logger.info(f"Filtered {len(search_results)} -> {len(sorted_results)} results (min_credibility={config.min_credibility_score})")
+
+                logger.info(f"Filtered {len(search_results)} -> {len(sorted_results)} results "
+                           f"(min_credibility={config.min_credibility_score}, age_filtered={age_filtered_count})")
                 
                 # Mark queries as completed
                 for q in state.plan.search_queries:
@@ -618,12 +642,13 @@ class ReportWriter:
                 # Compile final report
                 final_report = self._compile_report(temp_state)
                 
-                # Format citations in specified style
+                # Format citations in specified style with dates
                 if state.search_results:
                     final_report = self.citation_formatter.update_report_citations(
                         final_report,
                         style=self.citation_style,
-                        search_results=state.search_results
+                        search_results=state.search_results,
+                        credibility_scores=state.credibility_scores
                     )
                 
                 # Add credibility information to report if available

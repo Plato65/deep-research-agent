@@ -299,13 +299,40 @@ class CredibilityScorer:
         scored.sort(key=lambda x: x['credibility']['score'], reverse=True)
         return scored
     
-    def filter_by_credibility(self, results: List, min_score: int = 40) -> List:
-        """Filter results by minimum credibility score."""
+    def filter_by_credibility(self, results: List, min_score: int = 40, max_age_days: int = 0) -> List:
+        """Filter results by minimum credibility score and optional maximum age.
+
+        Args:
+            results: List of search results to filter
+            min_score: Minimum credibility score (0-100)
+            max_age_days: Maximum age in days (0 = no age filter)
+
+        Returns:
+            Filtered list of results
+        """
         scored = self.score_search_results(results)
-        filtered = [
-            item['result'] for item in scored
-            if item['credibility']['score'] >= min_score
-        ]
-        logger.info(f"Filtered {len(results)} -> {len(filtered)} results (min_score={min_score})")
+        filtered = []
+        age_filtered_count = 0
+
+        for item in scored:
+            # Check credibility score
+            if item['credibility']['score'] < min_score:
+                continue
+
+            # Check age if filtering is enabled
+            if max_age_days > 0 and 'recency' in item['credibility']:
+                recency_info = item['credibility']['recency']
+                age_days = recency_info.get('age_days')
+
+                # If we have age info and it's too old, skip it
+                if age_days is not None and age_days > max_age_days:
+                    age_filtered_count += 1
+                    logger.debug(f"Filtered out source older than {max_age_days} days: {age_days} days old")
+                    continue
+
+            filtered.append(item['result'])
+
+        logger.info(f"Filtered {len(results)} -> {len(filtered)} results "
+                   f"(min_score={min_score}, age_filtered={age_filtered_count})")
         return filtered
 

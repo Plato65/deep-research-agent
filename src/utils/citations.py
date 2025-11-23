@@ -18,6 +18,10 @@ class CitationFormatter:
         """Format citation in APA style."""
         if author and date:
             return f"{author} ({date}). {title}. Retrieved from {url}"
+        elif date and title:
+            return f"{title}. ({date}). Retrieved from {url}"
+        elif date:
+            return f"({date}). Retrieved from {url}"
         elif title:
             return f"{title}. (n.d.). Retrieved from {url}"
         else:
@@ -54,15 +58,17 @@ class CitationFormatter:
         self,
         urls: List[str],
         style: str = 'apa',
-        search_results: List = None
+        search_results: List = None,
+        credibility_scores: List[Dict] = None
     ) -> str:
         """Format a references section in the specified style.
-        
+
         Args:
             urls: List of URLs to cite
             style: Citation style ('apa', 'mla', 'chicago', 'ieee')
             search_results: Optional search results to extract metadata
-        
+            credibility_scores: Optional credibility scores with recency info
+
         Returns:
             Formatted references section
         """
@@ -70,46 +76,67 @@ class CitationFormatter:
         if style not in self.styles:
             style = 'apa'
             logger.warning(f"Unknown style {style}, defaulting to APA")
-        
+
         # Create URL to metadata mapping
         url_metadata = {}
         if search_results:
-            for result in search_results:
+            for i, result in enumerate(search_results):
                 if hasattr(result, 'url') and result.url:
-                    url_metadata[result.url] = {
+                    metadata = {
                         'title': getattr(result, 'title', ''),
                         'snippet': getattr(result, 'snippet', '')
                     }
-        
+
+                    # Extract date from credibility scores if available
+                    if credibility_scores and i < len(credibility_scores):
+                        cred_score = credibility_scores[i]
+                        if 'recency' in cred_score:
+                            recency_info = cred_score['recency']
+                            if 'date' in recency_info:
+                                metadata['date'] = recency_info['date']
+
+                    url_metadata[result.url] = metadata
+
         references = []
         for i, url in enumerate(urls, 1):
             metadata = url_metadata.get(url, {})
             title = metadata.get('title', '')
-            
+            date = metadata.get('date', '')
+
             if style == 'apa':
-                citation = self.format_apa(url, title)
+                citation = self.format_apa(url, title, date=date)
             elif style == 'mla':
-                citation = self.format_mla(url, title)
+                citation = self.format_mla(url, title, date=date)
             elif style == 'chicago':
-                citation = self.format_chicago(url, title)
+                citation = self.format_chicago(url, title, date=date)
             elif style == 'ieee':
-                citation = self.format_ieee(url, title)
+                citation = self.format_ieee(url, title, date=date)
             else:
                 citation = url
-            
+
             references.append(f"{i}. {citation}")
-        
+
         return "\n".join(references)
     
     def update_report_citations(
         self,
         report_content: str,
         style: str = 'apa',
-        search_results: List = None
+        search_results: List = None,
+        credibility_scores: List[Dict] = None
     ) -> str:
-        """Update citations in a report to use specified style.
-        
+        """Update citations in a report to use specified style with dates.
+
         This updates the references section but keeps inline citations as [1], [2], etc.
+
+        Args:
+            report_content: The report text to update
+            style: Citation style to use
+            search_results: Search results with metadata
+            credibility_scores: Credibility scores with recency information
+
+        Returns:
+            Updated report with formatted citations
         """
         # Extract URLs from references section
         references_match = re.search(
@@ -117,21 +144,21 @@ class CitationFormatter:
             report_content,
             re.DOTALL
         )
-        
+
         if not references_match:
             return report_content
-        
+
         # Extract URLs from existing references
         url_pattern = r'https?://[^\s\)]+'
         existing_refs = references_match.group(1)
         urls = re.findall(url_pattern, existing_refs)
-        
+
         if not urls:
             return report_content
-        
-        # Format new references section
-        new_references = f"## References\n\n{self.format_references_section(urls, style, search_results)}"
-        
+
+        # Format new references section with date information
+        new_references = f"## References\n\n{self.format_references_section(urls, style, search_results, credibility_scores)}"
+
         # Replace references section
         updated_report = re.sub(
             r'## References\n\n.*?(?=\n##|\Z)',
@@ -139,6 +166,6 @@ class CitationFormatter:
             report_content,
             flags=re.DOTALL
         )
-        
+
         return updated_report
 

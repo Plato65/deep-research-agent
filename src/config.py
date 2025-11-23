@@ -66,18 +66,28 @@ class ResearchConfig(BaseModel):
     
     # Search Configuration
     max_search_queries: int = Field(
-        default=int(os.getenv("MAX_SEARCH_QUERIES", "3")),
-        description="Maximum number of search queries to generate"
+        default=int(os.getenv("MAX_SEARCH_QUERIES", "5")),
+        description="Maximum number of search queries to generate (increased for better coverage)"
     )
-    
+
     max_search_results_per_query: int = Field(
-        default=int(os.getenv("MAX_SEARCH_RESULTS_PER_QUERY", "3")),
-        description="Maximum results to fetch per search query"
+        default=int(os.getenv("MAX_SEARCH_RESULTS_PER_QUERY", "5")),
+        description="Maximum results to fetch per search query (increased for source diversity)"
     )
-    
+
     max_parallel_searches: int = Field(
         default=int(os.getenv("MAX_PARALLEL_SEARCHES", "3")),
         description="Maximum number of parallel search operations"
+    )
+
+    enable_time_bound_searches: bool = Field(
+        default=os.getenv("ENABLE_TIME_BOUND_SEARCHES", "true").lower() == "true",
+        description="Enable time-bound searches with recency keywords (latest, recent, 2024)"
+    )
+
+    max_source_age_days: int = Field(
+        default=int(os.getenv("MAX_SOURCE_AGE_DAYS", "365")),
+        description="Maximum age of sources in days (0 = no filter)"
     )
     
     # Credibility Configuration
