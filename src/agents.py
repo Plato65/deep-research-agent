@@ -334,18 +334,41 @@ Begin your research. Use the tools to gather comprehensive information."""
                 # Score all results first
                 scored_results = self.credibility_scorer.score_search_results(search_results)
 
-                # Filter by credibility score and age
+                # Filter by credibility score, age, and topic relevance
                 filtered_scored = []
                 age_filtered_count = 0
+                relevance_filtered_count = 0
 
                 for item in scored_results:
+                    result = item['result']
+                    cred = item['credibility']
+
                     # Check credibility score
-                    if item['credibility']['score'] < config.min_credibility_score:
+                    if cred['score'] < config.min_credibility_score:
                         continue
 
+                    # Check topic relevance - filter out arxiv papers on unrelated topics
+                    if hasattr(result, 'url') and hasattr(result, 'title'):
+                        if 'arxiv.org' in result.url.lower():
+                            title_lower = result.title.lower()
+                            # Topics clearly unrelated to job/employment/automation/AI workforce
+                            irrelevant_keywords = [
+                                'image processing', 'super-resolution', 'compression',
+                                'linguistics', 'spanish', 'historical', 'language model',
+                                'physics', 'quantum', 'particle', 'vertex', 'triangle',
+                                'chemistry', 'molecular', 'protein',
+                                'voice privacy', 'audio', 'speech recognition',
+                                'multiprocessor scheduling', 'algorithms',
+                                'building permit', 'construction',
+                            ]
+                            if any(keyword in title_lower for keyword in irrelevant_keywords):
+                                relevance_filtered_count += 1
+                                logger.debug(f"Filtered irrelevant arxiv paper: {result.title}")
+                                continue
+
                     # Check age if filtering is enabled
-                    if config.max_source_age_days > 0 and 'recency' in item['credibility']:
-                        recency_info = item['credibility']['recency']
+                    if config.max_source_age_days > 0 and 'recency' in cred:
+                        recency_info = cred['recency']
                         age_days = recency_info.get('age_days')
 
                         # If we have age info and it's too old, skip it
@@ -361,7 +384,8 @@ Begin your research. Use the tools to gather comprehensive information."""
                 sorted_results = [item['result'] for item in filtered_scored]
 
                 logger.info(f"Filtered {len(search_results)} -> {len(sorted_results)} results "
-                           f"(min_credibility={config.min_credibility_score}, age_filtered={age_filtered_count})")
+                           f"(min_credibility={config.min_credibility_score}, age_filtered={age_filtered_count}, "
+                           f"relevance_filtered={relevance_filtered_count})")
                 
                 # Mark queries as completed
                 for q in state.plan.search_queries:
