@@ -17,24 +17,40 @@ class ResearchConfig(BaseModel):
     # Model Provider Configuration
     model_provider: str = Field(
         default=os.getenv("MODEL_PROVIDER", "gemini"),
-        description="Model provider: 'gemini', 'ollama', or 'openai'"
+        description="Model provider: 'gemini', 'ollama', 'openai', or 'lmstudio'"
     )
-    
+
     # API Keys
     google_api_key: str = Field(
         default_factory=lambda: os.getenv("GEMINI_API_KEY", ""),
         description="Google/Gemini API key (required if using Gemini)"
     )
-    
+
     openai_api_key: str = Field(
         default_factory=lambda: os.getenv("OPENAI_API_KEY", ""),
         description="OpenAI API key (required if using OpenAI)"
     )
-    
+
+    openai_base_url: str = Field(
+        default=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        description="OpenAI API base URL (for custom endpoints/proxies)"
+    )
+
     # Ollama Configuration
     ollama_base_url: str = Field(
         default=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         description="Ollama server URL"
+    )
+
+    # LM Studio Configuration
+    lmstudio_base_url: str = Field(
+        default=os.getenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1"),
+        description="LM Studio server URL (OpenAI-compatible endpoint)"
+    )
+
+    lmstudio_model_name: str = Field(
+        default=os.getenv("LMSTUDIO_MODEL_NAME", "local-model"),
+        description="LM Studio model name (must match loaded model)"
     )
     
     # Model Configuration
@@ -77,14 +93,152 @@ class ResearchConfig(BaseModel):
     )
     
     min_section_words: int = Field(
-        default=200,
+        default=int(os.getenv("MIN_SECTION_WORDS", "200")),
         description="Minimum words per section"
     )
-    
+
     # Citation Configuration
     citation_style: str = Field(
         default=os.getenv("CITATION_STYLE", "apa"),
         description="Citation style (apa, mla, chicago, ieee)"
+    )
+
+    # NEW: Specialized Search Configuration
+    enable_arxiv_search: bool = Field(
+        default=os.getenv("ENABLE_ARXIV_SEARCH", "true").lower() == "true",
+        description="Enable arXiv academic paper search"
+    )
+
+    enable_ssrn_search: bool = Field(
+        default=os.getenv("ENABLE_SSRN_SEARCH", "true").lower() == "true",
+        description="Enable SSRN paper search"
+    )
+
+    enable_hackernews_search: bool = Field(
+        default=os.getenv("ENABLE_HACKERNEWS_SEARCH", "true").lower() == "true",
+        description="Enable Hacker News search"
+    )
+
+    enable_reddit_search: bool = Field(
+        default=os.getenv("ENABLE_REDDIT_SEARCH", "true").lower() == "true",
+        description="Enable Reddit search"
+    )
+
+    # Reddit API (optional - for better rate limits)
+    reddit_client_id: str = Field(
+        default=os.getenv("REDDIT_CLIENT_ID", ""),
+        description="Reddit API client ID (optional)"
+    )
+
+    reddit_client_secret: str = Field(
+        default=os.getenv("REDDIT_CLIENT_SECRET", ""),
+        description="Reddit API client secret (optional)"
+    )
+
+    reddit_user_agent: str = Field(
+        default=os.getenv("REDDIT_USER_AGENT", "deep-research-agent/1.0"),
+        description="Reddit API user agent"
+    )
+
+    # NEW: Credibility & Quality
+    detect_consulting_reports: bool = Field(
+        default=os.getenv("DETECT_CONSULTING_REPORTS", "true").lower() == "true",
+        description="Detect and prioritize consulting firm reports"
+    )
+
+    prioritize_academic_sources: bool = Field(
+        default=os.getenv("PRIORITIZE_ACADEMIC_SOURCES", "true").lower() == "true",
+        description="Prioritize academic sources in credibility scoring"
+    )
+
+    # NEW: Rate Limiting & Timeouts
+    web_request_timeout: int = Field(
+        default=int(os.getenv("WEB_REQUEST_TIMEOUT", "10")),
+        description="Web request timeout in seconds"
+    )
+
+    search_rate_limit_seconds: float = Field(
+        default=float(os.getenv("SEARCH_RATE_LIMIT_SECONDS", "2.0")),
+        description="Minimum seconds between search requests"
+    )
+
+    content_extraction_timeout: int = Field(
+        default=int(os.getenv("CONTENT_EXTRACTION_TIMEOUT", "15")),
+        description="Content extraction timeout in seconds"
+    )
+
+    max_retries: int = Field(
+        default=int(os.getenv("MAX_RETRIES", "3")),
+        description="Maximum retries for failed operations"
+    )
+
+    # NEW: Caching Configuration
+    enable_cache: bool = Field(
+        default=os.getenv("ENABLE_CACHE", "true").lower() == "true",
+        description="Enable research result caching"
+    )
+
+    cache_ttl_days: int = Field(
+        default=int(os.getenv("CACHE_TTL_DAYS", "7")),
+        description="Cache time-to-live in days"
+    )
+
+    cache_dir: str = Field(
+        default=os.getenv("CACHE_DIR", "./.cache/research"),
+        description="Cache directory path"
+    )
+
+    # NEW: Logging Configuration
+    log_level: str = Field(
+        default=os.getenv("LOG_LEVEL", "INFO"),
+        description="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"
+    )
+
+    structured_logging: bool = Field(
+        default=os.getenv("STRUCTURED_LOGGING", "false").lower() == "true",
+        description="Enable structured JSON logging"
+    )
+
+    log_file: Optional[str] = Field(
+        default=os.getenv("LOG_FILE", None),
+        description="Log file path (optional)"
+    )
+
+    # NEW: Advanced LLM Configuration
+    llm_temperature: float = Field(
+        default=float(os.getenv("LLM_TEMPERATURE", "0.7")),
+        description="LLM temperature for research"
+    )
+
+    synthesis_temperature: float = Field(
+        default=float(os.getenv("SYNTHESIS_TEMPERATURE", "0.3")),
+        description="LLM temperature for synthesis"
+    )
+
+    context_window_size: int = Field(
+        default=int(os.getenv("CONTEXT_WINDOW_SIZE", "8192")),
+        description="Context window size for local models"
+    )
+
+    enable_streaming: bool = Field(
+        default=os.getenv("ENABLE_STREAMING", "false").lower() == "true",
+        description="Enable content streaming"
+    )
+
+    max_tokens_per_call: int = Field(
+        default=int(os.getenv("MAX_TOKENS_PER_CALL", "4096")),
+        description="Maximum tokens per LLM call"
+    )
+
+    # NEW: Export Configuration
+    enable_html_export: bool = Field(
+        default=os.getenv("ENABLE_HTML_EXPORT", "true").lower() == "true",
+        description="Enable HTML export"
+    )
+
+    enable_txt_export: bool = Field(
+        default=os.getenv("ENABLE_TXT_EXPORT", "true").lower() == "true",
+        description="Enable TXT export"
     )
     
     # LangSmith Configuration
@@ -111,17 +265,43 @@ class ResearchConfig(BaseModel):
                 import requests
                 response = requests.get(f"{self.ollama_base_url}/api/tags", timeout=5)
                 if response.status_code != 200:
-                    raise ValueError(f"Ollama server not accessible at {self.ollama_base_url}")
+                    raise ValueError(
+                        f"Ollama server not accessible at {self.ollama_base_url}. "
+                        f"Make sure Ollama is running: 'ollama serve'"
+                    )
             except requests.exceptions.RequestException as e:
-                raise ValueError(f"Cannot connect to Ollama server at {self.ollama_base_url}: {e}")
+                raise ValueError(
+                    f"Cannot connect to Ollama server at {self.ollama_base_url}. "
+                    f"Error: {e}\n"
+                    f"Make sure Ollama is installed and running: 'ollama serve'"
+                )
+        elif self.model_provider == "lmstudio":
+            # Validate LM Studio is accessible
+            try:
+                import requests
+                response = requests.get(f"{self.lmstudio_base_url}/models", timeout=5)
+                if response.status_code != 200:
+                    raise ValueError(
+                        f"LM Studio server not accessible at {self.lmstudio_base_url}. "
+                        f"Make sure LM Studio is running and the server is started."
+                    )
+            except requests.exceptions.RequestException as e:
+                raise ValueError(
+                    f"Cannot connect to LM Studio server at {self.lmstudio_base_url}. "
+                    f"Error: {e}\n"
+                    f"Make sure LM Studio is running with a model loaded and the local server is enabled."
+                )
         elif self.model_provider == "openai":
             if not self.openai_api_key:
                 raise ValueError(
                     "OPENAI_API_KEY is required when using OpenAI. Get one from https://platform.openai.com/api-keys"
                 )
         else:
-            raise ValueError(f"Invalid MODEL_PROVIDER: {self.model_provider}. Must be 'gemini', 'ollama', or 'openai'")
-        
+            raise ValueError(
+                f"Invalid MODEL_PROVIDER: {self.model_provider}. "
+                f"Must be 'gemini', 'ollama', 'lmstudio', or 'openai'"
+            )
+
         return True
 
 

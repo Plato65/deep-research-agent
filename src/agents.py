@@ -23,50 +23,63 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def get_llm(temperature: float = 0.7, model_override: str = None):
+def get_llm(temperature: float = None, model_override: str = None):
     """Get LLM instance based on configuration.
-    
+
     Args:
-        temperature: Temperature for the LLM
+        temperature: Temperature for the LLM (defaults to config.llm_temperature)
         model_override: Optional model name to override config.model_name
-        
+
     Returns:
-        LLM instance (ChatOllama, ChatGoogleGenerativeAI, or ChatOpenAI)
+        LLM instance (ChatOllama, ChatGoogleGenerativeAI, ChatOpenAI, or LM Studio)
     """
     model_name = model_override or config.model_name
-    
+    temp = temperature if temperature is not None else config.llm_temperature
+
     if config.model_provider == "ollama":
         logger.info(f"Using Ollama model: {model_name}")
         return ChatOllama(
             model=model_name,
             base_url=config.ollama_base_url,
-            temperature=temperature,
-            num_ctx=8192,  # Context window
+            temperature=temp,
+            num_ctx=config.context_window_size,
+        )
+    elif config.model_provider == "lmstudio":
+        logger.info(f"Using LM Studio model: {model_name}")
+        # LM Studio uses OpenAI-compatible API
+        return ChatOpenAI(
+            model=model_name or config.lmstudio_model_name,
+            base_url=config.lmstudio_base_url,
+            api_key="lm-studio",  # LM Studio doesn't require real API key
+            temperature=temp,
+            max_tokens=config.max_tokens_per_call
         )
     elif config.model_provider == "openai":
         logger.info(f"Using OpenAI model: {model_name}")
         return ChatOpenAI(
             model=model_name,
+            base_url=config.openai_base_url,
             api_key=config.openai_api_key,
-            temperature=temperature
+            temperature=temp,
+            max_tokens=config.max_tokens_per_call
         )
     else:  # gemini
         logger.info(f"Using Gemini model: {model_name}")
         return ChatGoogleGenerativeAI(
             model=model_name,
             google_api_key=config.google_api_key,
-            temperature=temperature
+            temperature=temp
         )
 
 
 class ResearchPlanner:
     """Autonomous agent responsible for planning research strategy."""
-    
+
     def __init__(self):
-        self.llm = get_llm(temperature=0.7)
+        self.llm = get_llm()  # Uses config.llm_temperature
         # Note: Planning agent uses LLM directly with structured output for reliability
         # Tool calling works better for search/extraction tasks
-        self.max_retries = 3
+        self.max_retries = config.max_retries
         
     async def plan(self, state: ResearchState) -> dict:
         """Create a research plan with structured LLM output.
@@ -197,12 +210,12 @@ Create a detailed research plan in JSON format:
 
 class ResearchSearcher:
     """Autonomous agent responsible for executing research searches."""
-    
+
     def __init__(self):
-        self.llm = get_llm(temperature=0.3)
+        self.llm = get_llm(temperature=config.synthesis_temperature)
         self.tools = get_research_tools(agent_type="search")
         self.credibility_scorer = CredibilityScorer()
-        self.max_retries = 3
+        self.max_retries = config.max_retries
         
     async def search(self, state: ResearchState) -> dict:
         """Autonomously execute research searches using tools.
@@ -407,11 +420,11 @@ Begin your research. Use the tools to gather comprehensive information."""
 
 class ResearchSynthesizer:
     """Autonomous agent responsible for synthesizing research findings."""
-    
+
     def __init__(self):
-        self.llm = get_llm(temperature=0.3, model_override=config.summarization_model)
+        self.llm = get_llm(temperature=config.synthesis_temperature, model_override=config.summarization_model)
         self.tools = get_research_tools(agent_type="synthesis")
-        self.max_retries = 3
+        self.max_retries = config.max_retries
         
     async def synthesize(self, state: ResearchState) -> dict:
         """Autonomously synthesize key findings using tools and reasoning.
@@ -596,12 +609,12 @@ Please analyze these search results and extract key findings. You may use the ex
 
 class ReportWriter:
     """Autonomous agent responsible for writing research reports."""
-    
-    def __init__(self, citation_style: str = 'apa'):
-        self.llm = get_llm(temperature=0.7)
+
+    def __init__(self, citation_style: str = None):
+        self.llm = get_llm()  # Uses config.llm_temperature
         self.tools = get_research_tools(agent_type="writing")
-        self.max_retries = 3
-        self.citation_style = citation_style
+        self.max_retries = config.max_retries
+        self.citation_style = citation_style or config.citation_style
         self.citation_formatter = CitationFormatter()
         
     async def write_report(self, state: ResearchState) -> dict:

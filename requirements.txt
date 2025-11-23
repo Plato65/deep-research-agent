@@ -13,4 +13,11 @@ markdown>=3.7
 pydantic>=2.10.6
 aiohttp>=3.11.11
 chainlit>=1.0.0
+lxml>=5.1.0
+
+# Specialized search tools
+praw>=7.7.1  # Reddit API (optional)
+
+# XML parsing for arXiv
+lxml>=5.1.0
 
