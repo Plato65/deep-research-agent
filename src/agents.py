@@ -214,7 +214,7 @@ class ResearchSearcher:
     def __init__(self):
         self.llm = get_llm(temperature=config.synthesis_temperature)
         self.tools = get_research_tools(agent_type="search")
-        self.credibility_scorer = CredibilityScorer()
+        self.credibility_scorer = CredibilityScorer(enable_recency_scoring=config.enable_recency_scoring)
         self.max_retries = config.max_retries
         
     async def search(self, state: ResearchState) -> dict:

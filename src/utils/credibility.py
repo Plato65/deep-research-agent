@@ -5,12 +5,23 @@ from typing import List, Dict, Any
 from urllib.parse import urlparse
 import logging
 
+from src.utils.recency import RecencyScorer
+
 logger = logging.getLogger(__name__)
 
 
 class CredibilityScorer:
     """Score sources based on domain authority and other credibility factors."""
-    
+
+    def __init__(self, enable_recency_scoring: bool = True):
+        """Initialize the credibility scorer.
+
+        Args:
+            enable_recency_scoring: Whether to include recency in scoring (default: True)
+        """
+        self.enable_recency_scoring = enable_recency_scoring
+        self.recency_scorer = RecencyScorer() if enable_recency_scoring else None
+
     # Trusted domains
     TRUSTED_DOMAINS = {
         # Academic institutions (global)
@@ -100,11 +111,16 @@ class CredibilityScorer:
         r'blogspot|wordpress\.com',  # Personal blogs (lower credibility)
     ]
     
-    def score_url(self, url: str) -> Dict[str, Any]:
-        """Score a URL's credibility.
+    def score_url(self, url: str, title: str = "", snippet: str = "") -> Dict[str, Any]:
+        """Score a URL's credibility including recency.
+
+        Args:
+            url: URL to score
+            title: Title of the source (optional, for recency detection)
+            snippet: Snippet/description (optional, for recency detection)
 
         Returns:
-            Dict with 'score' (0-100), 'factors', 'level' (low/medium/high), 'source_type'
+            Dict with 'score' (0-100), 'factors', 'level' (low/medium/high), 'source_type', 'recency'
         """
         if not url:
             return {'score': 0, 'factors': ['No URL'], 'level': 'low', 'source_type': 'unknown'}
@@ -112,6 +128,7 @@ class CredibilityScorer:
         score = 50  # Base score
         factors = []
         source_type = 'general'
+        recency_info = None
 
         try:
             parsed = urlparse(url)
@@ -211,6 +228,14 @@ class CredibilityScorer:
                     score += 5
                     factors.append('Direct PDF link')
 
+            # Recency scoring (add bonus for recent content)
+            if self.enable_recency_scoring and self.recency_scorer:
+                recency_info = self.recency_scorer.score_source_recency(url, title, snippet)
+                recency_bonus = recency_info.get('score', 0)
+                if recency_bonus > 0:
+                    score += recency_bonus
+                    factors.append(recency_info.get('factor', 'Recent content'))
+
             # Normalize score to 0-100
             score = max(0, min(100, score))
 
@@ -222,13 +247,19 @@ class CredibilityScorer:
             else:
                 level = 'low'
 
-            return {
+            result = {
                 'score': score,
                 'factors': factors if factors else ['Standard domain'],
                 'level': level,
                 'domain': domain,
                 'source_type': source_type
             }
+
+            # Include recency information if available
+            if recency_info:
+                result['recency'] = recency_info
+
+            return result
 
         except Exception as e:
             logger.warning(f"Error scoring URL {url}: {e}")
@@ -240,22 +271,30 @@ class CredibilityScorer:
             }
     
     def score_search_results(self, results: List) -> List[Dict]:
-        """Score a list of search results."""
+        """Score a list of search results including recency."""
         scored = []
         for result in results:
+            # Extract URL, title, and snippet
             if hasattr(result, 'url'):
                 url = result.url
+                title = getattr(result, 'title', '')
+                snippet = getattr(result, 'snippet', '')
             elif isinstance(result, dict):
                 url = result.get('url', '')
+                title = result.get('title', '')
+                snippet = result.get('snippet', '')
             else:
                 url = str(result)
-            
-            credibility = self.score_url(url)
+                title = ''
+                snippet = ''
+
+            # Score with recency information
+            credibility = self.score_url(url, title, snippet)
             scored.append({
                 'result': result,
                 'credibility': credibility
             })
-        
+
         # Sort by credibility score (highest first)
         scored.sort(key=lambda x: x['credibility']['score'], reverse=True)
         return scored

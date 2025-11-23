@@ -151,6 +151,11 @@ class ResearchConfig(BaseModel):
         description="Prioritize academic sources in credibility scoring"
     )
 
+    enable_recency_scoring: bool = Field(
+        default=os.getenv("ENABLE_RECENCY_SCORING", "true").lower() == "true",
+        description="Enable recency scoring to prioritize more recent sources"
+    )
+
     # NEW: Rate Limiting & Timeouts
     web_request_timeout: int = Field(
         default=int(os.getenv("WEB_REQUEST_TIMEOUT", "10")),
