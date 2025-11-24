@@ -76,10 +76,13 @@ class ResearchPlanner:
     """Autonomous agent responsible for planning research strategy."""
 
     def __init__(self):
-        self.llm = get_llm()  # Uses config.llm_temperature
+        # Use planner-specific model if configured, otherwise fall back to default
+        model_name = config.planner_model or config.model_name
+        self.llm = get_llm(model_override=model_name)  # Uses config.llm_temperature
         # Note: Planning agent uses LLM directly with structured output for reliability
         # Tool calling works better for search/extraction tasks
         self.max_retries = config.max_retries
+        logger.info(f"ResearchPlanner initialized with model: {model_name}")
         
     async def plan(self, state: ResearchState) -> dict:
         """Create a research plan with structured LLM output.
@@ -234,10 +237,13 @@ class ResearchSearcher:
     """Autonomous agent responsible for executing research searches."""
 
     def __init__(self):
-        self.llm = get_llm(temperature=config.synthesis_temperature)
+        # Use search-specific model if configured, otherwise fall back to default
+        model_name = config.search_model or config.model_name
+        self.llm = get_llm(temperature=config.synthesis_temperature, model_override=model_name)
         self.tools = get_research_tools(agent_type="search")
         self.credibility_scorer = CredibilityScorer(enable_recency_scoring=config.enable_recency_scoring)
         self.max_retries = config.max_retries
+        logger.info(f"ResearchSearcher initialized with model: {model_name}")
         
     async def search(self, state: ResearchState) -> dict:
         """Autonomously execute research searches using tools.
@@ -584,9 +590,12 @@ class ResearchSynthesizer:
     """Autonomous agent responsible for synthesizing research findings."""
 
     def __init__(self):
-        self.llm = get_llm(temperature=config.synthesis_temperature, model_override=config.summarization_model)
+        # Use synthesis-specific model if configured, otherwise fall back to summarization_model
+        model_name = config.synthesis_model or config.summarization_model
+        self.llm = get_llm(temperature=config.synthesis_temperature, model_override=model_name)
         self.tools = get_research_tools(agent_type="synthesis")
         self.max_retries = config.max_retries
+        logger.info(f"ResearchSynthesizer initialized with model: {model_name}")
         
     async def synthesize(self, state: ResearchState) -> dict:
         """Autonomously synthesize key findings using tools and reasoning.
@@ -772,11 +781,14 @@ class ReportWriter:
     """Autonomous agent responsible for writing research reports."""
 
     def __init__(self, citation_style: str = None):
-        self.llm = get_llm()  # Uses config.llm_temperature
+        # Use writing-specific model if configured, otherwise fall back to default
+        model_name = config.writing_model or config.model_name
+        self.llm = get_llm(model_override=model_name)  # Uses config.llm_temperature
         self.tools = get_research_tools(agent_type="writing")
         self.max_retries = config.max_retries
         self.citation_style = citation_style or config.citation_style
         self.citation_formatter = CitationFormatter()
+        logger.info(f"ReportWriter initialized with model: {model_name}")
         
     async def write_report(self, state: ResearchState) -> dict:
         """Write the final research report with validation and retry.

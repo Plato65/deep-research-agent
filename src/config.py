@@ -58,12 +58,33 @@ class ResearchConfig(BaseModel):
         default=os.getenv("MODEL_NAME", "gemini-2.5-flash"),
         description="Model to use for research and generation"
     )
-    
+
     summarization_model: str = Field(
         default=os.getenv("SUMMARIZATION_MODEL", "gemini-2.5-flash"),
         description="Model for summarizing search results (faster/cheaper)"
     )
-    
+
+    # Agent-Specific Model Configuration (optional overrides)
+    planner_model: Optional[str] = Field(
+        default=os.getenv("PLANNER_MODEL", None),
+        description="Model for planning agent (defaults to model_name if not set)"
+    )
+
+    search_model: Optional[str] = Field(
+        default=os.getenv("SEARCH_MODEL", None),
+        description="Model for search agent (defaults to model_name if not set)"
+    )
+
+    synthesis_model: Optional[str] = Field(
+        default=os.getenv("SYNTHESIS_MODEL", None),
+        description="Model for synthesis agent (defaults to summarization_model if not set)"
+    )
+
+    writing_model: Optional[str] = Field(
+        default=os.getenv("WRITING_MODEL", None),
+        description="Model for writing agent (defaults to model_name if not set)"
+    )
+
     # Search Configuration
     max_search_queries: int = Field(
         default=int(os.getenv("MAX_SEARCH_QUERIES", "5")),
