@@ -16,6 +16,7 @@ from src.utils.tools import get_research_tools
 from src.config import config
 from src.utils.credibility import CredibilityScorer
 from src.utils.citations import CitationFormatter
+from src.utils.deduplication import DeduplicationCache
 from src.llm_tracker import estimate_tokens
 import time
 
@@ -260,8 +261,9 @@ class ResearchSearcher:
         self.llm = None  # Lazy loading
         self.tools = get_research_tools(agent_type="search")
         self.credibility_scorer = CredibilityScorer(enable_recency_scoring=config.enable_recency_scoring)
+        self.dedup_cache = DeduplicationCache(window_days=config.deduplication_window_days) if config.enable_deduplication else None
         self.max_retries = config.max_retries
-        logger.info(f"ResearchSearcher initialized (lazy load: {self.model_name})")
+        logger.info(f"ResearchSearcher initialized (lazy load: {self.model_name}, dedup: {config.enable_deduplication})")
 
     def _ensure_llm_loaded(self):
         """Ensure LLM is loaded (lazy loading)."""
@@ -430,9 +432,25 @@ Begin your research. Use the tools to gather comprehensive information."""
                 credibility_scores = [item['credibility'] for item in filtered_scored]
                 sorted_results = [item['result'] for item in filtered_scored]
 
+                # Apply deduplication if enabled (for weekly mode)
+                dedup_filtered_count = 0
+                if self.dedup_cache:
+                    previous_hashes = self.dedup_cache.load_previous_hashes()
+                    sorted_results, duplicates = self.dedup_cache.check_duplicates(sorted_results, previous_hashes)
+                    dedup_filtered_count = len(duplicates)
+                    # Update credibility scores to match filtered results
+                    if dedup_filtered_count > 0:
+                        # Rebuild credibility_scores for remaining sources
+                        remaining_urls = {getattr(r, 'url', '') for r in sorted_results}
+                        credibility_scores = [
+                            item['credibility'] for item in filtered_scored
+                            if getattr(item['result'], 'url', '') in remaining_urls
+                        ]
+
                 logger.info(f"Filtered {len(search_results)} -> {len(sorted_results)} results "
                            f"(min_credibility={config.min_credibility_score}, age_filtered={age_filtered_count}, "
-                           f"relevance_filtered={relevance_filtered_count}, homepage_filtered={homepage_filtered_count})")
+                           f"relevance_filtered={relevance_filtered_count}, homepage_filtered={homepage_filtered_count}, "
+                           f"dedup_filtered={dedup_filtered_count})")
                 
                 # Mark queries as completed
                 for q in state.plan.search_queries:
