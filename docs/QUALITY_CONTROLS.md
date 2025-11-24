@@ -4,13 +4,207 @@ Production-grade quality validation and observability system for ensuring report
 
 ## Overview
 
-Deep Research Agent v2.1 includes comprehensive quality controls to prevent bad reports from reaching production:
+Deep Research Agent v2.1+ includes comprehensive quality controls to prevent bad reports from reaching production:
 
+- **Self-Correction Loop**: Intelligent iterative refinement when quality is insufficient ⭐ NEW
 - **Citation Verification**: Ensures all citations reference valid sources
 - **Hallucination Detection**: Identifies unsupported claims without citations
 - **Freshness Checking**: Verifies sources meet recency requirements
 - **Observability**: Structured logging and telemetry for debugging
 - **Pre-flight Validation**: Environment checks before research runs
+
+## Self-Correction Loop ⭐ NEW
+
+**The single biggest quality improvement** - enables iterative refinement when initial research is insufficient.
+
+### How It Works
+
+After synthesis, the **ResearchCritic agent** evaluates quality and decides whether to refine:
+
+```
+Plan → Search → Synthesize → Critique
+                              ↓
+                    Quality < 70? → YES → Search again (with feedback)
+                              ↓             ↓
+                             NO             Synthesize → Critique
+                              ↓             ↓
+                    Write Report ← Quality OK or Max Iterations
+```
+
+### ResearchCritic Agent
+
+Evaluates synthesis quality on **5 dimensions**:
+
+**1. Coverage (0-100)**: Do findings address ALL objectives?
+- 100: All objectives fully addressed with comprehensive detail
+- 75: Most objectives addressed, minor gaps
+- 50: Some objectives addressed, significant gaps
+- 25: Few objectives addressed
+- 0: Objectives not addressed
+
+**2. Evidence (0-100)**: Are claims well-supported by sources?
+- 100: All findings backed by multiple quality sources
+- 75: Most findings well-supported
+- 50: Some findings lack evidence
+- 25: Many unsupported claims
+- 0: Little to no source backing
+
+**3. Depth (0-100)**: Is analysis substantive or superficial?
+- 100: Deep analysis with insights, context, implications
+- 75: Good analysis with some depth
+- 50: Basic facts with minimal analysis
+- 25: Very superficial coverage
+- 0: No meaningful analysis
+
+**4. Specificity (0-100)**: Are findings concrete or vague?
+- 100: Specific data, numbers, examples, names, dates
+- 75: Mostly concrete with some specifics
+- 50: Mix of specific and general statements
+- 25: Mostly vague generalities
+- 0: All generic statements
+
+**5. Recency (0-100)**: Is information current and relevant?
+- 100: Very recent information (< 30 days)
+- 75: Recent information (< 6 months)
+- 50: Somewhat dated (< 1 year)
+- 25: Old information (> 1 year)
+- 0: Outdated or no timestamps
+
+**Overall Score**: Average of all 5 dimensions
+
+### Refinement Logic
+
+**If overall_score < 70 AND iterations < 2:**
+1. Critic identifies **missing topics**
+2. Critic provides **recommended queries** to address gaps
+3. System loops back to **Search** with these specific queries
+4. New sources gathered, synthesized, and re-evaluated
+
+**Otherwise:**
+- Proceed to report generation
+- Quality acceptable OR max iterations reached
+
+### Example Critique Output
+
+```
+✓ Research Critique
+  Overall Score: 65/100
+
+  Dimension Scores:
+    Coverage: 60 (missing 2 of 5 objectives)
+    Evidence: 70 (most claims supported)
+    Depth: 55 (superficial in key areas)
+    Specificity: 65 (lacks concrete data)
+    Recency: 75 (mostly recent sources)
+
+  Strengths:
+    - Good source diversity
+    - Recent information on market trends
+
+  Weaknesses:
+    - Missing analysis of regulatory impact
+    - Lacks specific adoption numbers
+    - Industry comparison superficial
+
+  Missing Topics:
+    - Regulatory framework changes
+    - Adoption statistics by sector
+    - Competitor analysis
+
+  Recommended Queries:
+    - "AI regulation impact 2024 specific rules"
+    - "AI adoption statistics by industry 2024"
+    - "competitive analysis AI platforms market share"
+
+  Action: REFINE (iteration 1/2)
+```
+
+### Configuration
+
+**Thresholds** (in `src/graph.py`):
+```python
+MAX_REFINEMENT_ITERATIONS = 2  # Maximum refinement loops
+QUALITY_THRESHOLD = 70  # Minimum score to proceed
+```
+
+**Customize for your use case:**
+```python
+# Stricter quality (more iterations, higher threshold)
+MAX_REFINEMENT_ITERATIONS = 3
+QUALITY_THRESHOLD = 80
+
+# Faster but lower quality (fewer iterations)
+MAX_REFINEMENT_ITERATIONS = 1
+QUALITY_THRESHOLD = 60
+```
+
+### When Self-Correction Triggers
+
+**Common scenarios:**
+1. **Insufficient coverage**: Initial search missed key objectives
+2. **Lack of evidence**: Claims without source backing
+3. **Superficial analysis**: Basic facts without depth
+4. **Missing specifics**: Generic statements without data
+5. **Outdated information**: Old sources for recent topics
+
+**Example trigger:**
+```
+Research Topic: "Impact of GPT-4 on software development"
+
+Initial Critique (Score: 62):
+- Coverage: Missing "cost analysis" objective
+- Evidence: Productivity claims lack source backing
+- Specificity: No concrete adoption numbers
+
+Action: Loop back to search with queries:
+1. "GPT-4 cost comparison software development ROI"
+2. "developer productivity GPT-4 statistics 2024"
+3. "software company GPT-4 adoption rates"
+```
+
+### Benefits
+
+**Quality improvements:**
+- ✅ **Prevents incomplete research** - Catches missing objectives early
+- ✅ **Ensures evidence backing** - No unsupported claims
+- ✅ **Adds depth** - Surface-level findings trigger refinement
+- ✅ **Demands specificity** - Generic analysis flagged for improvement
+- ✅ **Maintains recency** - Old information triggers fresh search
+
+**Cost efficiency:**
+- ✅ **Targeted refinement** - Only searches for specific gaps
+- ✅ **Early success exit** - Skips refinement if quality high
+- ✅ **Limited iterations** - Max 2 loops prevents runaway cost
+
+**Transparency:**
+- ✅ **Detailed feedback** - Know exactly what's missing
+- ✅ **Actionable queries** - See what additional searches will run
+- ✅ **Iteration tracking** - Monitor refinement progress
+
+### Telemetry
+
+Self-correction events logged:
+
+```json
+{
+  "event": "agent_completed",
+  "agent": "critic",
+  "duration_seconds": 2.1,
+  "overall_score": 65,
+  "should_refine": true,
+  "timestamp": "2025-01-24T11:30:00"
+}
+```
+
+**Monitor refinement frequency:**
+```bash
+cat outputs/telemetry/session_*.json | jq '.detailed_metrics.agents.critic.last_metrics.should_refine'
+```
+
+**Track quality scores over time:**
+```bash
+cat outputs/telemetry/session_*.json | jq '.detailed_metrics.agents.critic.last_metrics.overall_score'
+```
 
 ## Quality Validation System
 
