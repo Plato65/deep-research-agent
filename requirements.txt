@@ -14,6 +14,7 @@ pydantic>=2.10.6
 aiohttp>=3.11.11
 chainlit>=1.0.0
 lxml>=5.1.0
+structlog>=24.4.0  # Structured logging for observability
 
 # Specialized search tools
 praw>=7.7.1  # Reddit API (optional)
