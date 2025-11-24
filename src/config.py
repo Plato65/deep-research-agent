@@ -273,6 +273,27 @@ class ResearchConfig(BaseModel):
         description="Reddit API user agent"
     )
 
+    # NEW: RSS/Newsletter Ingestion
+    enable_rss_feeds: bool = Field(
+        default=os.getenv("ENABLE_RSS_FEEDS", "true").lower() == "true",
+        description="Enable RSS/Atom feed ingestion for early signal detection"
+    )
+
+    rss_feed_days: int = Field(
+        default=int(os.getenv("RSS_FEED_DAYS", "7")),
+        description="Number of days back to fetch RSS items"
+    )
+
+    rss_max_items_per_feed: int = Field(
+        default=int(os.getenv("RSS_MAX_ITEMS_PER_FEED", "10")),
+        description="Maximum items to fetch per RSS feed"
+    )
+
+    rss_priority_filter: Optional[str] = Field(
+        default=os.getenv("RSS_PRIORITY_FILTER", None),
+        description="Filter RSS feeds by priority (high, medium, low, or None for all)"
+    )
+
     # NEW: Credibility & Quality
     detect_consulting_reports: bool = Field(
         default=os.getenv("DETECT_CONSULTING_REPORTS", "true").lower() == "true",

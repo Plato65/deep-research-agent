@@ -296,6 +296,26 @@ class ResearchSearcher:
             return {"error": "No research plan available"}
 
         logger.info(f"Autonomous agent researching: {len(state.plan.search_queries)} planned queries")
+
+        # Fetch RSS feeds if enabled (for early signal detection)
+        rss_results = []
+        if config.enable_rss_feeds:
+            try:
+                from src.utils.rss_reader import RSSFeedReader
+                rss_reader = RSSFeedReader()
+
+                logger.info(f"Fetching RSS feeds (days={config.rss_feed_days}, priority={config.rss_priority_filter or 'all'})")
+
+                rss_results = await rss_reader.fetch_by_topic(
+                    topic=state.research_topic,
+                    days=config.rss_feed_days,
+                    max_items=20  # Limit total RSS items
+                )
+
+                logger.info(f"Fetched {len(rss_results)} relevant RSS items")
+            except Exception as e:
+                logger.warning(f"RSS feed fetch failed: {e}")
+                # Continue with regular search even if RSS fails
         
         # Create system prompt for autonomous agent with config-based limits
         max_searches = config.max_search_queries
@@ -455,7 +475,26 @@ Begin your research. Use the tools to gather comprehensive information."""
                 # Mark queries as completed
                 for q in state.plan.search_queries:
                     q.completed = True
-                
+
+                # Merge RSS results with regular search results
+                all_results = sorted_results
+                if rss_results:
+                    logger.info(f"Adding {len(rss_results)} RSS items to search results")
+                    # Score RSS results for credibility
+                    rss_scored = self.credibility_scorer.score_search_results(rss_results)
+                    # Filter by credibility
+                    rss_filtered = [
+                        item['result'] for item in rss_scored
+                        if item['credibility']['score'] >= config.min_credibility_score
+                    ]
+                    logger.info(f"RSS items after credibility filter: {len(rss_filtered)}")
+                    # Add to beginning of results (RSS items are typically most recent)
+                    all_results = rss_filtered + sorted_results
+                    # Update credibility scores
+                    credibility_scores.extend([item['credibility'] for item in rss_scored if item['result'] in rss_filtered])
+
+                logger.info(f"Total search results (including RSS): {len(all_results)}")
+
                 call_detail = {
                     'agent': 'ResearchSearcher',
                     'operation': 'autonomous_search',
@@ -463,15 +502,16 @@ Begin your research. Use the tools to gather comprehensive information."""
                     'input_tokens': input_tokens,
                     'output_tokens': output_tokens,
                     'duration': round(duration, 2),
-                    'results_count': len(sorted_results),
+                    'results_count': len(all_results),
+                    'rss_results': len(rss_results),
                     'original_results_count': len(search_results),
                     'min_credibility_score': config.min_credibility_score,
                     'attempt': attempt + 1
                 }
-                
+
                 # Return dict updates - LangGraph merges into state
                 return {
-                    "search_results": sorted_results,
+                    "search_results": all_results,
                     "credibility_scores": credibility_scores,
                     "current_stage": "synthesizing",
                     "iterations": state.iterations + 1,
