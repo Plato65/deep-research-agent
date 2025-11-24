@@ -77,18 +77,36 @@ class ResearchPlanner:
 
     def __init__(self):
         # Use planner-specific model if configured, otherwise fall back to default
-        model_name = config.planner_model or config.model_name
-        self.llm = get_llm(model_override=model_name)  # Uses config.llm_temperature
+        self.model_name = config.planner_model or config.model_name
+        self.llm = None  # Lazy loading - only load when plan() is called
         # Note: Planning agent uses LLM directly with structured output for reliability
         # Tool calling works better for search/extraction tasks
         self.max_retries = config.max_retries
-        logger.info(f"ResearchPlanner initialized with model: {model_name}")
+        logger.info(f"ResearchPlanner initialized (lazy load: {self.model_name})")
+
+    def _ensure_llm_loaded(self):
+        """Ensure LLM is loaded (lazy loading)."""
+        if self.llm is None:
+            logger.info(f"Loading Planner LLM: {self.model_name}")
+            self.llm = get_llm(model_override=self.model_name)
+
+    def unload_model(self):
+        """Unload the LLM to free memory."""
+        if self.llm is not None and config.model_provider == "ollama":
+            try:
+                import subprocess
+                subprocess.run(["ollama", "stop", self.model_name], check=False, capture_output=True)
+                logger.info(f"Unloaded Planner model: {self.model_name}")
+            except Exception as e:
+                logger.debug(f"Could not unload model: {e}")
+            self.llm = None
         
     async def plan(self, state: ResearchState) -> dict:
         """Create a research plan with structured LLM output.
-        
+
         Returns dict with updates that LangGraph will merge into state.
         """
+        self._ensure_llm_loaded()  # Lazy load LLM
         logger.info(f"Planning research for: {state.research_topic}")
         
         prompt = ChatPromptTemplate.from_messages([
@@ -238,24 +256,43 @@ class ResearchSearcher:
 
     def __init__(self):
         # Use search-specific model if configured, otherwise fall back to default
-        model_name = config.search_model or config.model_name
-        self.llm = get_llm(temperature=config.synthesis_temperature, model_override=model_name)
+        self.model_name = config.search_model or config.model_name
+        self.llm = None  # Lazy loading
         self.tools = get_research_tools(agent_type="search")
         self.credibility_scorer = CredibilityScorer(enable_recency_scoring=config.enable_recency_scoring)
         self.max_retries = config.max_retries
-        logger.info(f"ResearchSearcher initialized with model: {model_name}")
+        logger.info(f"ResearchSearcher initialized (lazy load: {self.model_name})")
+
+    def _ensure_llm_loaded(self):
+        """Ensure LLM is loaded (lazy loading)."""
+        if self.llm is None:
+            logger.info(f"Loading Searcher LLM: {self.model_name}")
+            self.llm = get_llm(temperature=config.synthesis_temperature, model_override=self.model_name)
+
+    def unload_model(self):
+        """Unload the LLM to free memory."""
+        if self.llm is not None and config.model_provider == "ollama":
+            try:
+                import subprocess
+                subprocess.run(["ollama", "stop", self.model_name], check=False, capture_output=True)
+                logger.info(f"Unloaded Searcher model: {self.model_name}")
+            except Exception as e:
+                logger.debug(f"Could not unload model: {e}")
+            self.llm = None
         
     async def search(self, state: ResearchState) -> dict:
         """Autonomously execute research searches using tools.
-        
+
         The agent will decide which searches to perform, when to extract content,
         and how to gather comprehensive information.
-        
+
         Returns dict with search results that LangGraph will merge into state.
         """
+        self._ensure_llm_loaded()  # Lazy load LLM
+
         if not state.plan:
             return {"error": "No research plan available"}
-        
+
         logger.info(f"Autonomous agent researching: {len(state.plan.search_queries)} planned queries")
         
         # Create system prompt for autonomous agent with config-based limits
@@ -591,19 +628,38 @@ class ResearchSynthesizer:
 
     def __init__(self):
         # Use synthesis-specific model if configured, otherwise fall back to summarization_model
-        model_name = config.synthesis_model or config.summarization_model
-        self.llm = get_llm(temperature=config.synthesis_temperature, model_override=model_name)
+        self.model_name = config.synthesis_model or config.summarization_model
+        self.llm = None  # Lazy loading
         self.tools = get_research_tools(agent_type="synthesis")
         self.max_retries = config.max_retries
-        logger.info(f"ResearchSynthesizer initialized with model: {model_name}")
+        logger.info(f"ResearchSynthesizer initialized (lazy load: {self.model_name})")
+
+    def _ensure_llm_loaded(self):
+        """Ensure LLM is loaded (lazy loading)."""
+        if self.llm is None:
+            logger.info(f"Loading Synthesizer LLM: {self.model_name}")
+            self.llm = get_llm(temperature=config.synthesis_temperature, model_override=self.model_name)
+
+    def unload_model(self):
+        """Unload the LLM to free memory."""
+        if self.llm is not None and config.model_provider == "ollama":
+            try:
+                import subprocess
+                subprocess.run(["ollama", "stop", self.model_name], check=False, capture_output=True)
+                logger.info(f"Unloaded Synthesizer model: {self.model_name}")
+            except Exception as e:
+                logger.debug(f"Could not unload model: {e}")
+            self.llm = None
         
     async def synthesize(self, state: ResearchState) -> dict:
         """Autonomously synthesize key findings using tools and reasoning.
-        
+
         Returns dict with key findings that LangGraph will merge into state.
         """
+        self._ensure_llm_loaded()  # Lazy load LLM
+
         logger.info(f"Synthesizing findings from {len(state.search_results)} results")
-        
+
         if not state.search_results:
             return {"error": "No search results to synthesize"}
         
@@ -782,19 +838,38 @@ class ReportWriter:
 
     def __init__(self, citation_style: str = None):
         # Use writing-specific model if configured, otherwise fall back to default
-        model_name = config.writing_model or config.model_name
-        self.llm = get_llm(model_override=model_name)  # Uses config.llm_temperature
+        self.model_name = config.writing_model or config.model_name
+        self.llm = None  # Lazy loading
         self.tools = get_research_tools(agent_type="writing")
         self.max_retries = config.max_retries
         self.citation_style = citation_style or config.citation_style
         self.citation_formatter = CitationFormatter()
-        logger.info(f"ReportWriter initialized with model: {model_name}")
+        logger.info(f"ReportWriter initialized (lazy load: {self.model_name})")
+
+    def _ensure_llm_loaded(self):
+        """Ensure LLM is loaded (lazy loading)."""
+        if self.llm is None:
+            logger.info(f"Loading Writer LLM: {self.model_name}")
+            self.llm = get_llm(model_override=self.model_name)
+
+    def unload_model(self):
+        """Unload the LLM to free memory."""
+        if self.llm is not None and config.model_provider == "ollama":
+            try:
+                import subprocess
+                subprocess.run(["ollama", "stop", self.model_name], check=False, capture_output=True)
+                logger.info(f"Unloaded Writer model: {self.model_name}")
+            except Exception as e:
+                logger.debug(f"Could not unload model: {e}")
+            self.llm = None
         
     async def write_report(self, state: ResearchState) -> dict:
         """Write the final research report with validation and retry.
 
         Returns dict with report data that LangGraph will merge into state.
         """
+        self._ensure_llm_loaded()  # Lazy load LLM
+
         logger.info("Writing final report")
 
         if not state.plan or not state.key_findings:
