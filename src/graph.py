@@ -7,7 +7,7 @@ This is the recommended pattern per LangGraph documentation.
 import time
 from langgraph.graph import StateGraph, START, END
 from src.state import ResearchState
-from src.agents import ResearchPlanner, ResearchSearcher, ResearchSynthesizer, ReportWriter
+from src.agents import ResearchPlanner, ResearchSearcher, ResearchSynthesizer, ReportWriter, ResearchCritic
 from src.utils.cache import ResearchCache
 from src.utils.quality_checks import QualityValidator
 from src.utils.telemetry import get_telemetry
@@ -16,6 +16,10 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Self-correction loop configuration
+MAX_REFINEMENT_ITERATIONS = 2  # Maximum number of times to refine research
+QUALITY_THRESHOLD = 70  # Minimum quality score to proceed without refinement
 
 
 def create_research_graph():
@@ -26,6 +30,7 @@ def create_research_graph():
     searcher = ResearchSearcher()
     synthesizer = ResearchSynthesizer()
     writer = ReportWriter(citation_style=config.citation_style)
+    critic = ResearchCritic()
     quality_validator = QualityValidator()
     telemetry = get_telemetry()
 
@@ -103,6 +108,27 @@ def create_research_graph():
 
         return result
 
+    async def critique_with_unload(state: ResearchState) -> dict:
+        """Critique synthesis quality and provide feedback."""
+        telemetry.log_agent_start("critic", findings=len(state.key_findings))
+        start_time = time.time()
+
+        result = await critic.critique(state)
+        critic.unload_model()  # Free memory before next stage
+
+        duration = time.time() - start_time
+        quality_score = result.get("quality_score", {})
+        overall_score = quality_score.get("overall_score", 0)
+
+        telemetry.log_agent_complete(
+            "critic",
+            duration=duration,
+            overall_score=overall_score,
+            should_refine=quality_score.get("should_refine", False)
+        )
+
+        return result
+
     async def write_report_final(state: ResearchState) -> dict:
         """Write report (no unload - final stage)."""
         telemetry.log_agent_start("writer", findings=len(state.key_findings))
@@ -174,10 +200,11 @@ def create_research_graph():
     # Define the graph
     workflow = StateGraph(ResearchState)
 
-    # Add nodes with model unloading wrappers and quality validation
+    # Add nodes with model unloading wrappers, critique, and quality validation
     workflow.add_node("plan", plan_with_unload)
     workflow.add_node("search", search_with_unload)
     workflow.add_node("synthesize", synthesize_with_unload)
+    workflow.add_node("critique", critique_with_unload)
     workflow.add_node("write_report", write_report_final)
     workflow.add_node("validate_quality", validate_quality)
     
@@ -219,18 +246,57 @@ def create_research_graph():
         return "synthesize"
     
     def should_continue_after_synthesize(state: ResearchState) -> str:
-        """Validate synthesis output and route appropriately."""
+        """Validate synthesis output and route to critique."""
         if state.error:
             logger.error(f"Synthesis failed: {state.error}")
             return END
-        
+
         if not state.key_findings:
             logger.warning("No key findings extracted")
             state.error = "Failed to extract findings from search results"
             return END
-        
-        logger.info(f"Synthesis validated: {len(state.key_findings)} findings")
-        return "write_report"
+
+        logger.info(f"Synthesis validated: {len(state.key_findings)} findings - proceeding to critique")
+        return "critique"
+
+    def should_continue_after_critique(state: ResearchState) -> str:
+        """Decide whether to refine research or proceed to report writing."""
+        if state.error:
+            logger.error(f"Critique failed: {state.error}")
+            return END
+
+        # Get quality score from critique
+        quality_score = state.quality_score
+        if not quality_score:
+            logger.warning("No quality score from critique - proceeding to report")
+            return "write_report"
+
+        overall_score = quality_score.get("overall_score", 0)
+        should_refine = quality_score.get("should_refine", False)
+
+        # Check if we've exceeded max iterations
+        if state.iterations >= MAX_REFINEMENT_ITERATIONS:
+            logger.info(f"Max iterations ({MAX_REFINEMENT_ITERATIONS}) reached - proceeding to report")
+            return "write_report"
+
+        # Check if refinement is needed
+        if should_refine and overall_score < QUALITY_THRESHOLD:
+            logger.warning(f"Quality insufficient ({overall_score}/100) - iteration {state.iterations + 1}/{MAX_REFINEMENT_ITERATIONS}")
+            logger.info("Looping back to search with critic feedback")
+
+            # Increment iterations counter
+            state.iterations += 1
+
+            # Log recommended queries if available
+            if quality_score.get("recommended_queries"):
+                logger.info(f"Recommended queries: {len(quality_score['recommended_queries'])}")
+                for i, query in enumerate(quality_score["recommended_queries"][:3], 1):
+                    logger.info(f"  {i}. {query}")
+
+            return "search"
+        else:
+            logger.info(f"Quality acceptable ({overall_score}/100) - proceeding to report")
+            return "write_report"
     
     def should_continue_after_report(state: ResearchState) -> str:
         """Validate final report and route to quality validation."""
@@ -276,11 +342,21 @@ def create_research_graph():
         "synthesize",
         should_continue_after_synthesize,
         {
-            "write_report": "write_report",
+            "critique": "critique",
             END: END
         }
     )
-    
+
+    workflow.add_conditional_edges(
+        "critique",
+        should_continue_after_critique,
+        {
+            "search": "search",  # Loop back for refinement
+            "write_report": "write_report",  # Proceed to report
+            END: END
+        }
+    )
+
     workflow.add_conditional_edges(
         "write_report",
         should_continue_after_report,

@@ -81,6 +81,7 @@ class ResearchState(BaseModel):
     
     # Quality and metrics
     quality_score: Optional[Dict] = Field(default=None, description="Report quality metrics")
+    critique_feedback: Optional[str] = Field(default=None, description="Feedback from research critic")
     credibility_scores: List[Dict] = Field(default_factory=list, description="Source credibility scores")
     
     # LLM tracking

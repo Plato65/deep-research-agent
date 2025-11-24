@@ -1251,6 +1251,209 @@ Write a comprehensive, well-researched section using inline citations [1] throug
                 logger.info(f"Added {len(master_source_info)} references with consistent numbering")
             else:
                 report_parts.append("*No sources were available for this research.*\n")
-        
+
         return "".join(report_parts)
+
+
+class ResearchCritic:
+    """Agent responsible for evaluating synthesis quality and providing feedback."""
+
+    def __init__(self):
+        # Use synthesis-specific model if configured, otherwise fall back to default
+        self.model_name = config.synthesis_model or config.summarization_model
+        self.llm = None  # Lazy loading
+        self.max_retries = config.max_retries
+        logger.info(f"ResearchCritic initialized (lazy load: {self.model_name})")
+
+    def _ensure_llm_loaded(self):
+        """Ensure LLM is loaded (lazy loading)."""
+        if self.llm is None:
+            logger.info(f"Loading Critic LLM: {self.model_name}")
+            # Use lower temperature for more consistent evaluation
+            self.llm = get_llm(temperature=0.2, model_override=self.model_name)
+
+    def unload_model(self):
+        """Unload the LLM to free memory."""
+        if self.llm is not None and config.model_provider == "ollama":
+            try:
+                import subprocess
+                subprocess.run(["ollama", "stop", self.model_name], check=False, capture_output=True)
+                logger.info(f"Unloaded Critic model: {self.model_name}")
+            except Exception as e:
+                logger.debug(f"Could not unload model: {e}")
+            self.llm = None
+
+    async def critique(self, state: ResearchState) -> dict:
+        """Evaluate synthesis quality and provide feedback.
+
+        Returns dict with quality_score and critique_feedback that LangGraph will merge into state.
+        """
+        self._ensure_llm_loaded()
+        logger.info("Evaluating synthesis quality")
+
+        # Build context for critique
+        objectives = state.plan.objectives if state.plan else []
+        findings = state.key_findings if state.key_findings else []
+        sources_count = len(state.search_results) if state.search_results else 0
+
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are an expert research quality evaluator. Your job is to assess whether the research findings adequately address the research objectives.
+
+Evaluate the research on these dimensions:
+
+1. **Coverage (0-100)**: Do findings address ALL objectives?
+   - 100: All objectives fully addressed with comprehensive detail
+   - 75: Most objectives addressed, minor gaps
+   - 50: Some objectives addressed, significant gaps
+   - 25: Few objectives addressed
+   - 0: Objectives not addressed
+
+2. **Evidence (0-100)**: Are claims well-supported by sources?
+   - 100: All findings backed by multiple quality sources
+   - 75: Most findings well-supported
+   - 50: Some findings lack evidence
+   - 25: Many unsupported claims
+   - 0: Little to no source backing
+
+3. **Depth (0-100)**: Is analysis substantive or superficial?
+   - 100: Deep analysis with insights, context, implications
+   - 75: Good analysis with some depth
+   - 50: Basic facts with minimal analysis
+   - 25: Very superficial coverage
+   - 0: No meaningful analysis
+
+4. **Specificity (0-100)**: Are findings concrete or vague?
+   - 100: Specific data, numbers, examples, names, dates
+   - 75: Mostly concrete with some specifics
+   - 50: Mix of specific and general statements
+   - 25: Mostly vague generalities
+   - 0: All generic statements
+
+5. **Recency (0-100)**: Is information current and relevant?
+   - 100: Very recent information (< 30 days)
+   - 75: Recent information (< 6 months)
+   - 50: Somewhat dated (< 1 year)
+   - 25: Old information (> 1 year)
+   - 0: Outdated or no timestamps
+
+Return your evaluation as JSON with this exact structure:
+{{
+    "coverage_score": <0-100>,
+    "evidence_score": <0-100>,
+    "depth_score": <0-100>,
+    "specificity_score": <0-100>,
+    "recency_score": <0-100>,
+    "overall_score": <average of all scores>,
+    "strengths": ["strength 1", "strength 2", ...],
+    "weaknesses": ["weakness 1", "weakness 2", ...],
+    "missing_topics": ["topic 1", "topic 2", ...],
+    "recommended_queries": ["query 1", "query 2", ...],
+    "should_refine": <true if overall_score < 70, false otherwise>,
+    "feedback": "Detailed explanation of evaluation"
+}}
+
+If overall_score < 70, you MUST provide specific recommended_queries to address the gaps."""),
+            ("human", """Research Topic: {topic}
+
+Research Objectives:
+{objectives}
+
+Key Findings ({findings_count} findings from {sources_count} sources):
+{findings}
+
+Evaluate this research and provide your critique in JSON format.""")
+        ])
+
+        # Format objectives and findings for prompt
+        objectives_text = "\n".join([f"{i+1}. {obj}" for i, obj in enumerate(objectives)]) if objectives else "No objectives specified"
+        findings_text = "\n".join([f"- {finding}" for finding in findings[:20]]) if findings else "No findings extracted"  # Limit to first 20 to avoid token limits
+
+        for attempt in range(self.max_retries):
+            try:
+                start_time = time.time()
+                chain = prompt | self.llm | JsonOutputParser()
+
+                # Estimate input tokens
+                input_text = f"{state.research_topic} {objectives_text} {findings_text}"
+                input_tokens = estimate_tokens(input_text)
+
+                result = await chain.ainvoke({
+                    "topic": state.research_topic,
+                    "objectives": objectives_text,
+                    "findings": findings_text,
+                    "findings_count": len(findings),
+                    "sources_count": sources_count
+                })
+
+                # Track LLM call
+                duration = time.time() - start_time
+                output_tokens = estimate_tokens(str(result))
+                call_detail = {
+                    'agent': 'ResearchCritic',
+                    'operation': 'critique',
+                    'model': self.model_name,
+                    'input_tokens': input_tokens,
+                    'output_tokens': output_tokens,
+                    'duration': round(duration, 2),
+                    'attempt': attempt + 1
+                }
+
+                # Validate result structure
+                required_keys = ["coverage_score", "evidence_score", "depth_score",
+                               "specificity_score", "recency_score", "overall_score",
+                               "should_refine", "feedback"]
+                if not all(key in result for key in required_keys):
+                    raise ValueError(f"Invalid critique structure. Missing keys: {set(required_keys) - set(result.keys())}")
+
+                # Ensure scores are in valid range
+                for score_key in ["coverage_score", "evidence_score", "depth_score",
+                                "specificity_score", "recency_score", "overall_score"]:
+                    if not (0 <= result[score_key] <= 100):
+                        result[score_key] = max(0, min(100, result[score_key]))
+
+                logger.info(f"Critique complete - Overall score: {result['overall_score']}/100")
+                logger.info(f"  Coverage: {result['coverage_score']}, Evidence: {result['evidence_score']}, "
+                          f"Depth: {result['depth_score']}, Specificity: {result['specificity_score']}, "
+                          f"Recency: {result['recency_score']}")
+
+                if result['should_refine']:
+                    logger.warning(f"Research quality insufficient ({result['overall_score']}/100) - refinement recommended")
+                    if result.get('missing_topics'):
+                        logger.warning(f"  Missing topics: {', '.join(result['missing_topics'][:3])}")
+                    if result.get('recommended_queries'):
+                        logger.info(f"  Recommended queries: {len(result['recommended_queries'])}")
+
+                # Return updates to merge into state
+                return {
+                    "quality_score": result,
+                    "critique_feedback": result.get("feedback", ""),
+                    "llm_calls": state.llm_calls + 1,
+                    "total_input_tokens": state.total_input_tokens + input_tokens,
+                    "total_output_tokens": state.total_output_tokens + output_tokens,
+                    "llm_call_details": state.llm_call_details + [call_detail]
+                }
+
+            except Exception as e:
+                logger.warning(f"Critique attempt {attempt + 1}/{self.max_retries} failed: {e}")
+                if attempt == self.max_retries - 1:
+                    logger.error(f"All critique attempts failed: {e}")
+                    # Return neutral scores if critique fails
+                    return {
+                        "quality_score": {
+                            "coverage_score": 50,
+                            "evidence_score": 50,
+                            "depth_score": 50,
+                            "specificity_score": 50,
+                            "recency_score": 50,
+                            "overall_score": 50,
+                            "should_refine": False,
+                            "feedback": f"Critique evaluation failed: {str(e)}",
+                            "strengths": [],
+                            "weaknesses": ["Could not evaluate quality"],
+                            "missing_topics": [],
+                            "recommended_queries": []
+                        },
+                        "critique_feedback": f"Critique failed: {str(e)}"
+                    }
+                await asyncio.sleep(2 ** attempt)  # Exponential backoff
 
