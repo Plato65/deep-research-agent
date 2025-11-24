@@ -17,21 +17,46 @@ logger = logging.getLogger(__name__)
 
 def create_research_graph():
     """Create the research workflow graph with enhanced routing and error handling."""
-    
-    # Initialize agents
+
+    # Initialize agents (with lazy loading)
     planner = ResearchPlanner()
     searcher = ResearchSearcher()
     synthesizer = ResearchSynthesizer()
     writer = ReportWriter(citation_style=config.citation_style)
-    
+
+    # Wrapper functions to handle model unloading between stages
+    async def plan_with_unload(state: ResearchState) -> dict:
+        """Plan and unload model after completion."""
+        result = await planner.plan(state)
+        planner.unload_model()  # Free memory before next stage
+        return result
+
+    async def search_with_unload(state: ResearchState) -> dict:
+        """Search and unload model after completion."""
+        result = await searcher.search(state)
+        searcher.unload_model()  # Free memory before next stage
+        return result
+
+    async def synthesize_with_unload(state: ResearchState) -> dict:
+        """Synthesize and unload model after completion."""
+        result = await synthesizer.synthesize(state)
+        synthesizer.unload_model()  # Free memory before next stage
+        return result
+
+    async def write_report_final(state: ResearchState) -> dict:
+        """Write report (no unload - final stage)."""
+        result = await writer.write_report(state)
+        # Don't unload - this is the final stage
+        return result
+
     # Define the graph
     workflow = StateGraph(ResearchState)
-    
-    # Add nodes - functions return dicts that LangGraph merges into state
-    workflow.add_node("plan", planner.plan)
-    workflow.add_node("search", searcher.search)
-    workflow.add_node("synthesize", synthesizer.synthesize)
-    workflow.add_node("write_report", writer.write_report)
+
+    # Add nodes with model unloading wrappers
+    workflow.add_node("plan", plan_with_unload)
+    workflow.add_node("search", search_with_unload)
+    workflow.add_node("synthesize", synthesize_with_unload)
+    workflow.add_node("write_report", write_report_final)
     
     # Define entry point using START constant (v1.0 best practice)
     workflow.add_edge(START, "plan")
