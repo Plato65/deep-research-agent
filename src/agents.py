@@ -861,7 +861,17 @@ class ReportWriter:
                         search_results=state.search_results,
                         credibility_scores=state.credibility_scores
                     )
-                
+
+                    # Verify citation relevance and log warnings about potential mismatches
+                    citation_warnings = self.citation_formatter.verify_citation_relevance(
+                        final_report,
+                        search_results=state.search_results
+                    )
+                    if citation_warnings:
+                        logger.warning(f"Found {len(citation_warnings)} potential citation mismatches - review recommended")
+                        for warning in citation_warnings[:5]:  # Log first 5 warnings
+                            logger.warning(f"  [{warning['citation']}] {warning['source_title']}: {warning['claim'][:80]}...")
+
                 # Add credibility information to report if available
                 if state.credibility_scores:
                     high_cred_sources = [

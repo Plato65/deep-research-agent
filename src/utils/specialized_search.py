@@ -354,8 +354,20 @@ class ConsultingReportSearch:
                 if elapsed < self.min_delay:
                     await asyncio.sleep(self.min_delay - elapsed)
 
-                firm_query = f"{site_filter} {query}"
-                logger.info(f"Searching {firm_name.upper()} for: {query}")
+                # Remove mentions of other consulting firms from the query
+                # This prevents silly searches like "McKinsey report" on BCG website
+                cleaned_query = query
+                for other_firm in ['mckinsey', 'bcg', 'accenture', 'deloitte', 'bain', 'pwc']:
+                    # Remove firm name and common variations
+                    cleaned_query = re.sub(rf'\b{other_firm}\b', '', cleaned_query, flags=re.IGNORECASE)
+                    cleaned_query = re.sub(rf'\b{other_firm} report\b', '', cleaned_query, flags=re.IGNORECASE)
+                    cleaned_query = re.sub(rf'\b{other_firm} analysis\b', '', cleaned_query, flags=re.IGNORECASE)
+
+                # Clean up extra whitespace
+                cleaned_query = ' '.join(cleaned_query.split())
+
+                firm_query = f"{site_filter} {cleaned_query}"
+                logger.info(f"Searching {firm_name.upper()} for: {cleaned_query}")
 
                 search_tool = WebSearchTool(max_results=results_per_firm)
                 results = await search_tool.search_async(firm_query)
