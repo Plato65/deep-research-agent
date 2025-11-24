@@ -1,18 +1,73 @@
 """Configuration management for the Deep Research Agent."""
 
 import os
-from typing import Optional
+from typing import Optional, Dict, Any, List
 from pathlib import Path
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
 
+# Research Mode Presets
+RESEARCH_MODES: Dict[str, Dict[str, Any]] = {
+    'weekly': {
+        'max_source_age_days': 14,
+        'enable_deduplication': True,
+        'deduplication_window_days': 30,
+        'primary_search_apis': ['serper', 'tavily'],
+        'fallback_search_apis': ['brave', 'duckduckgo'],
+        'enable_time_bound_searches': True,
+        'search_cache_ttl_hours': 6,
+        'enable_cloud_apis': True,
+        'enable_recency_scoring': True,
+        'min_credibility_score': 50,
+        'description': 'Weekly monitoring: recent news (<14 days), deduplication, fast updates'
+    },
+    'general': {
+        'max_source_age_days': 365,
+        'enable_deduplication': False,
+        'deduplication_window_days': 0,
+        'primary_search_apis': ['serper', 'tavily', 'brave'],
+        'fallback_search_apis': ['duckduckgo'],
+        'enable_time_bound_searches': False,
+        'search_cache_ttl_hours': 24,
+        'enable_cloud_apis': True,
+        'enable_recency_scoring': True,
+        'min_credibility_score': 40,
+        'description': 'General research: comprehensive, no date limits, all sources'
+    },
+    'privacy': {
+        'max_source_age_days': 365,
+        'enable_deduplication': False,
+        'deduplication_window_days': 0,
+        'primary_search_apis': ['duckduckgo'],
+        'fallback_search_apis': [],
+        'enable_time_bound_searches': False,
+        'search_cache_ttl_hours': 24,
+        'enable_cloud_apis': False,
+        'enable_recency_scoring': True,
+        'min_credibility_score': 40,
+        'force_local_models': True,
+        'disable_api_search': True,
+        'description': 'Privacy mode: local models, no external APIs, no tracking'
+    }
+}
+
+
 class ResearchConfig(BaseModel):
     """Configuration for the research agent."""
+
+    # Research Mode Configuration
+    research_mode: str = Field(
+        default=os.getenv("RESEARCH_MODE", "general"),
+        description="Research mode: 'weekly' (monitoring), 'general' (comprehensive), or 'privacy' (local-only)"
+    )
 
     # Model Provider Configuration
     model_provider: str = Field(
@@ -110,7 +165,54 @@ class ResearchConfig(BaseModel):
         default=int(os.getenv("MAX_SOURCE_AGE_DAYS", "365")),
         description="Maximum age of sources in days (0 = no filter)"
     )
-    
+
+    # Deduplication Configuration
+    enable_deduplication: bool = Field(
+        default=os.getenv("ENABLE_DEDUPLICATION", "false").lower() == "true",
+        description="Enable deduplication to avoid repeating sources from previous reports"
+    )
+
+    deduplication_window_days: int = Field(
+        default=int(os.getenv("DEDUPLICATION_WINDOW_DAYS", "30")),
+        description="How many days back to check for duplicate sources"
+    )
+
+    # Search API Configuration
+    serper_api_key: str = Field(
+        default_factory=lambda: os.getenv("SERPER_API_KEY", ""),
+        description="Serper API key for Google Search"
+    )
+
+    tavily_api_key: str = Field(
+        default_factory=lambda: os.getenv("TAVILY_API_KEY", ""),
+        description="Tavily API key for research search"
+    )
+
+    brave_api_key: str = Field(
+        default_factory=lambda: os.getenv("BRAVE_API_KEY", ""),
+        description="Brave Search API key"
+    )
+
+    primary_search_apis: List[str] = Field(
+        default_factory=lambda: os.getenv("PRIMARY_SEARCH_APIS", "").split(",") if os.getenv("PRIMARY_SEARCH_APIS") else [],
+        description="Primary search APIs to use (serper, tavily, brave, duckduckgo)"
+    )
+
+    fallback_search_apis: List[str] = Field(
+        default_factory=lambda: os.getenv("FALLBACK_SEARCH_APIS", "").split(",") if os.getenv("FALLBACK_SEARCH_APIS") else [],
+        description="Fallback search APIs if primary fails"
+    )
+
+    search_cache_ttl_hours: int = Field(
+        default=int(os.getenv("SEARCH_CACHE_TTL_HOURS", "24")),
+        description="Search result cache TTL in hours"
+    )
+
+    enable_cloud_apis: bool = Field(
+        default=os.getenv("ENABLE_CLOUD_APIS", "true").lower() == "true",
+        description="Enable cloud-based search APIs (disable for privacy mode)"
+    )
+
     # Credibility Configuration
     min_credibility_score: int = Field(
         default=int(os.getenv("MIN_CREDIBILITY_SCORE", "40")),
@@ -287,7 +389,55 @@ class ResearchConfig(BaseModel):
         default=os.getenv("LANGCHAIN_PROJECT", "deep-research-agent"),
         description="LangSmith project name"
     )
-    
+
+    def __init__(self, **data):
+        """Initialize and apply research mode defaults."""
+        super().__init__(**data)
+        self._apply_mode_defaults()
+
+    def _apply_mode_defaults(self):
+        """Apply research mode defaults if mode is set and fields aren't explicitly overridden."""
+        mode = self.research_mode.lower()
+
+        if mode not in RESEARCH_MODES:
+            logger.warning(f"Unknown research mode '{mode}', using 'general'")
+            mode = 'general'
+
+        mode_config = RESEARCH_MODES[mode]
+
+        # Apply mode defaults only if not explicitly set in env vars
+        # Check if env vars were set (if they were, don't override with mode defaults)
+        def apply_if_not_set(attr_name: str, mode_value: Any, env_var: str):
+            """Apply mode default only if env var wasn't explicitly set."""
+            if not os.getenv(env_var):
+                setattr(self, attr_name, mode_value)
+
+        apply_if_not_set('max_source_age_days', mode_config['max_source_age_days'], 'MAX_SOURCE_AGE_DAYS')
+        apply_if_not_set('enable_deduplication', mode_config['enable_deduplication'], 'ENABLE_DEDUPLICATION')
+        apply_if_not_set('deduplication_window_days', mode_config['deduplication_window_days'], 'DEDUPLICATION_WINDOW_DAYS')
+        apply_if_not_set('enable_time_bound_searches', mode_config['enable_time_bound_searches'], 'ENABLE_TIME_BOUND_SEARCHES')
+        apply_if_not_set('search_cache_ttl_hours', mode_config['search_cache_ttl_hours'], 'SEARCH_CACHE_TTL_HOURS')
+        apply_if_not_set('enable_cloud_apis', mode_config['enable_cloud_apis'], 'ENABLE_CLOUD_APIS')
+        apply_if_not_set('enable_recency_scoring', mode_config['enable_recency_scoring'], 'ENABLE_RECENCY_SCORING')
+        apply_if_not_set('min_credibility_score', mode_config['min_credibility_score'], 'MIN_CREDIBILITY_SCORE')
+
+        # Apply search API lists if not explicitly set
+        if not os.getenv('PRIMARY_SEARCH_APIS') and not self.primary_search_apis:
+            self.primary_search_apis = mode_config['primary_search_apis']
+        if not os.getenv('FALLBACK_SEARCH_APIS') and not self.fallback_search_apis:
+            self.fallback_search_apis = mode_config['fallback_search_apis']
+
+        # Privacy mode enforcement
+        if mode == 'privacy':
+            if mode_config.get('force_local_models') and os.getenv('MODEL_PROVIDER') != 'ollama':
+                logger.warning("Privacy mode requires local models - forcing MODEL_PROVIDER=ollama")
+                self.model_provider = 'ollama'
+            if mode_config.get('disable_api_search'):
+                self.enable_reddit_search = False
+                self.enable_hackernews_search = False  # If they require API keys
+
+        logger.info(f"Research Mode: {mode.upper()} - {mode_config['description']}")
+
     def validate_config(self) -> bool:
         """Validate that required configuration is present."""
         if self.model_provider == "gemini":
