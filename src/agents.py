@@ -302,7 +302,22 @@ class ResearchSearcher:
         if config.enable_rss_feeds:
             try:
                 from src.utils.rss_reader import RSSFeedReader
-                rss_reader = RSSFeedReader()
+                import json
+
+                # Parse custom feeds if provided
+                custom_feeds = None
+                if config.custom_rss_feeds:
+                    try:
+                        custom_feeds = json.loads(config.custom_rss_feeds)
+                    except json.JSONDecodeError:
+                        logger.warning("Failed to parse custom RSS feeds, skipping")
+
+                # Initialize RSS reader with configuration
+                rss_reader = RSSFeedReader(
+                    enabled_feeds=config.enabled_rss_feeds,
+                    disabled_feeds=config.disabled_rss_feeds,
+                    custom_feeds=custom_feeds
+                )
 
                 logger.info(f"Fetching RSS feeds (days={config.rss_feed_days}, priority={config.rss_priority_filter or 'all'})")
 

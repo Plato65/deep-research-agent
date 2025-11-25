@@ -294,6 +294,21 @@ class ResearchConfig(BaseModel):
         description="Filter RSS feeds by priority (high, medium, low, or None for all)"
     )
 
+    enabled_rss_feeds: Optional[List[str]] = Field(
+        default=None,
+        description="Comma-separated list of specific RSS feeds to enable (None = all based on priority filter). Example: 'openai_blog,anthropic_blog,arxiv_cs_ai'"
+    )
+
+    disabled_rss_feeds: List[str] = Field(
+        default_factory=list,
+        description="Comma-separated list of RSS feeds to explicitly disable. Example: 'venturebeat_ai,mit_tech_ai'"
+    )
+
+    custom_rss_feeds: Optional[str] = Field(
+        default=os.getenv("CUSTOM_RSS_FEEDS", None),
+        description="JSON string of custom RSS feeds to add. Example: '{\"my_feed\": {\"url\": \"https://example.com/feed.xml\", \"description\": \"My Feed\", \"priority\": \"high\"}}'"
+    )
+
     # NEW: Credibility & Quality
     detect_consulting_reports: bool = Field(
         default=os.getenv("DETECT_CONSULTING_REPORTS", "true").lower() == "true",
@@ -415,6 +430,7 @@ class ResearchConfig(BaseModel):
         """Initialize and apply research mode defaults."""
         super().__init__(**data)
         self._apply_mode_defaults()
+        self._parse_rss_config()
 
     def _apply_mode_defaults(self):
         """Apply research mode defaults if mode is set and fields aren't explicitly overridden."""
@@ -458,6 +474,46 @@ class ResearchConfig(BaseModel):
                 self.enable_hackernews_search = False  # If they require API keys
 
         logger.info(f"Research Mode: {mode.upper()} - {mode_config['description']}")
+
+    def _parse_rss_config(self):
+        """Parse RSS feed configuration from environment variables."""
+        import json
+
+        # Parse enabled RSS feeds from comma-separated string
+        enabled_feeds_str = os.getenv("ENABLED_RSS_FEEDS")
+        if enabled_feeds_str:
+            self.enabled_rss_feeds = [feed.strip() for feed in enabled_feeds_str.split(",") if feed.strip()]
+
+        # Parse disabled RSS feeds from comma-separated string
+        disabled_feeds_str = os.getenv("DISABLED_RSS_FEEDS")
+        if disabled_feeds_str:
+            self.disabled_rss_feeds = [feed.strip() for feed in disabled_feeds_str.split(",") if feed.strip()]
+
+        # Parse custom RSS feeds from JSON string
+        if self.custom_rss_feeds:
+            try:
+                # Validate it's valid JSON
+                custom_feeds = json.loads(self.custom_rss_feeds)
+                if not isinstance(custom_feeds, dict):
+                    logger.warning("CUSTOM_RSS_FEEDS must be a JSON object, ignoring")
+                    self.custom_rss_feeds = None
+                else:
+                    # Validate feed structure
+                    for feed_name, feed_config in custom_feeds.items():
+                        if not isinstance(feed_config, dict):
+                            logger.warning(f"Custom feed '{feed_name}' must be a dict, ignoring")
+                            continue
+                        if "url" not in feed_config:
+                            logger.warning(f"Custom feed '{feed_name}' missing 'url', ignoring")
+                            continue
+                        # Set defaults for optional fields
+                        feed_config.setdefault("description", feed_name)
+                        feed_config.setdefault("priority", "medium")
+                        feed_config.setdefault("max_items", 10)
+                        feed_config.setdefault("require_keyword_match", False)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse CUSTOM_RSS_FEEDS: {e}, ignoring")
+                self.custom_rss_feeds = None
 
     def validate_config(self) -> bool:
         """Validate that required configuration is present."""

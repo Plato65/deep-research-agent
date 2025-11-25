@@ -19,62 +19,86 @@ class RSSFeedReader:
 
     # Priority feeds for AI/ML research monitoring
     FEEDS = {
-        # Official blogs - high signal, authoritative
+        # Official blogs - high signal, authoritative (low volume)
         "openai_blog": {
             "url": "https://openai.com/blog/rss.xml",
             "description": "OpenAI official blog",
-            "priority": "high"
+            "priority": "high",
+            "max_items": 10,  # Low volume, fetch all recent
+            "require_keyword_match": False  # Trust all items from official blog
         },
         "anthropic_blog": {
             "url": "https://www.anthropic.com/news/rss.xml",
             "description": "Anthropic news and research",
-            "priority": "high"
+            "priority": "high",
+            "max_items": 10,
+            "require_keyword_match": False
         },
         "google_ai_blog": {
             "url": "https://blog.google/technology/ai/rss/",
             "description": "Google AI blog",
-            "priority": "high"
+            "priority": "high",
+            "max_items": 10,
+            "require_keyword_match": False
         },
         "meta_ai_blog": {
             "url": "https://ai.meta.com/blog/rss/",
             "description": "Meta AI research blog",
-            "priority": "high"
+            "priority": "high",
+            "max_items": 10,
+            "require_keyword_match": False
         },
 
-        # Research papers - academic sources
+        # Research papers - HIGH VOLUME (150+ per day)
         "arxiv_cs_ai": {
             "url": "http://export.arxiv.org/rss/cs.AI",
             "description": "arXiv CS.AI (Artificial Intelligence)",
-            "priority": "medium"
+            "priority": "medium",
+            "max_items": 200,  # Fetch more, filter by relevance
+            "require_keyword_match": True,  # MUST match topic
+            "return_top_n": 5  # Return only top 5 after filtering
         },
         "arxiv_cs_lg": {
             "url": "http://export.arxiv.org/rss/cs.LG",
             "description": "arXiv CS.LG (Machine Learning)",
-            "priority": "medium"
+            "priority": "medium",
+            "max_items": 200,
+            "require_keyword_match": True,
+            "return_top_n": 5
         },
         "arxiv_cs_cl": {
             "url": "http://export.arxiv.org/rss/cs.CL",
             "description": "arXiv CS.CL (Computation and Language)",
-            "priority": "medium"
+            "priority": "medium",
+            "max_items": 200,
+            "require_keyword_match": True,
+            "return_top_n": 5
         },
 
         # Community hubs - trending discussions
         "huggingface_blog": {
             "url": "https://huggingface.co/blog/feed.xml",
             "description": "Hugging Face blog",
-            "priority": "high"
+            "priority": "high",
+            "max_items": 15,
+            "require_keyword_match": False
         },
         "papers_with_code": {
             "url": "https://paperswithcode.com/latest/rss",
             "description": "Papers with Code latest",
-            "priority": "medium"
+            "priority": "medium",
+            "max_items": 20,
+            "require_keyword_match": True,
+            "return_top_n": 5
         },
 
         # Industry news - business intelligence
         "mit_tech_ai": {
             "url": "https://www.technologyreview.com/topic/artificial-intelligence/feed",
             "description": "MIT Technology Review AI",
-            "priority": "medium"
+            "priority": "medium",
+            "max_items": 15,
+            "require_keyword_match": False
         },
         "venturebeat_ai": {
             "url": "https://venturebeat.com/category/ai/feed/",
@@ -90,13 +114,30 @@ class RSSFeedReader:
         },
     }
 
-    def __init__(self, timeout: int = 10):
+    def __init__(
+        self,
+        timeout: int = 10,
+        enabled_feeds: Optional[List[str]] = None,
+        disabled_feeds: Optional[List[str]] = None,
+        custom_feeds: Optional[Dict[str, Dict]] = None
+    ):
         """Initialize RSS feed reader.
 
         Args:
             timeout: HTTP request timeout in seconds
+            enabled_feeds: List of specific feeds to enable (None = all)
+            disabled_feeds: List of feeds to disable
+            custom_feeds: Dictionary of custom feeds to add
         """
         self.timeout = timeout
+        self.enabled_feeds = enabled_feeds
+        self.disabled_feeds = disabled_feeds or []
+
+        # Merge custom feeds into FEEDS
+        self.feeds = self.FEEDS.copy()
+        if custom_feeds:
+            logger.info(f"Adding {len(custom_feeds)} custom RSS feeds")
+            self.feeds.update(custom_feeds)
 
     async def fetch_feed(self, feed_url: str) -> Optional[feedparser.FeedParserDict]:
         """Fetch and parse a single RSS/Atom feed.
@@ -201,32 +242,83 @@ class RSSFeedReader:
             content=content
         )
 
+    def _matches_keywords(self, text: str, keywords: set) -> bool:
+        """Check if text contains any of the keywords.
+
+        Args:
+            text: Text to search
+            keywords: Set of keywords to match
+
+        Returns:
+            True if any keyword is found
+        """
+        text_lower = text.lower()
+        return any(keyword in text_lower for keyword in keywords)
+
+    def _calculate_relevance_score(self, item: SearchResult, keywords: set) -> float:
+        """Calculate relevance score for an item based on keyword matches.
+
+        Args:
+            item: SearchResult to score
+            keywords: Set of keywords to match
+
+        Returns:
+            Relevance score (higher is better)
+        """
+        score = 0.0
+        title_lower = item.title.lower()
+        snippet_lower = item.snippet.lower()
+
+        # Title matches are worth more
+        for keyword in keywords:
+            if keyword in title_lower:
+                score += 2.0
+            if keyword in snippet_lower:
+                score += 1.0
+
+        return score
+
     async def fetch_recent(
         self,
         days: int = 7,
         feed_names: Optional[List[str]] = None,
         priority_filter: Optional[str] = None,
-        max_items_per_feed: int = 10
+        topic: Optional[str] = None
     ) -> List[SearchResult]:
-        """Fetch recent items from RSS feeds.
+        """Fetch recent items from RSS feeds with smart filtering.
 
         Args:
             days: Number of days back to fetch items
             feed_names: Specific feed names to fetch (None = all feeds)
             priority_filter: Filter by priority ("high", "medium", "low", None = all)
-            max_items_per_feed: Maximum items to return per feed
+            topic: Research topic for keyword filtering (None = no filtering)
 
         Returns:
             List of SearchResult objects
         """
-        logger.info(f"Fetching RSS feeds (last {days} days, priority={priority_filter or 'all'})")
+        logger.info(f"Fetching RSS feeds (last {days} days, priority={priority_filter or 'all'}, topic={topic or 'none'})")
 
         cutoff_date = datetime.now() - timedelta(days=days)
         results = []
 
+        # Extract keywords from topic if provided
+        keywords = set()
+        if topic:
+            keywords = set(topic.lower().split())
+
         # Filter feeds based on criteria
         feeds_to_fetch = {}
-        for feed_name, feed_config in self.FEEDS.items():
+        for feed_name, feed_config in self.feeds.items():
+            # Skip if explicitly disabled
+            if feed_name in self.disabled_feeds:
+                logger.debug(f"Skipping disabled feed: {feed_name}")
+                continue
+
+            # Filter by enabled list if specified
+            if self.enabled_feeds and feed_name not in self.enabled_feeds:
+                logger.debug(f"Skipping non-enabled feed: {feed_name}")
+                continue
+
             # Filter by specific feed names
             if feed_names and feed_name not in feed_names:
                 continue
@@ -247,16 +339,21 @@ class RSSFeedReader:
 
         feed_results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
-        # Process each feed
+        # Process each feed with per-feed configuration
         for (feed_name, feed_config), feed_data in zip(feeds_to_fetch.items(), feed_results):
             # Skip failed fetches
             if isinstance(feed_data, Exception) or feed_data is None:
                 logger.warning(f"Skipping {feed_name} due to fetch failure")
                 continue
 
-            # Process entries
-            items_added = 0
-            for entry in feed_data.entries:
+            # Get per-feed configuration
+            max_items = feed_config.get("max_items", 10)
+            require_keyword_match = feed_config.get("require_keyword_match", False)
+            return_top_n = feed_config.get("return_top_n", None)
+
+            # Collect entries from this feed
+            feed_items = []
+            for entry in feed_data.entries[:max_items]:  # Limit to max_items
                 # Check date
                 pub_date = self._parse_date(entry)
                 if pub_date and pub_date < cutoff_date:
@@ -269,13 +366,31 @@ class RSSFeedReader:
                     feed_config["description"]
                 )
 
-                results.append(result)
-                items_added += 1
+                # Apply keyword filtering if required
+                if require_keyword_match and topic:
+                    # Check if item matches keywords
+                    if self._matches_keywords(result.title, keywords) or \
+                       self._matches_keywords(result.snippet, keywords):
+                        # Calculate relevance score for ranking
+                        relevance = self._calculate_relevance_score(result, keywords)
+                        feed_items.append((result, relevance))
+                else:
+                    # No keyword matching required, add all items
+                    feed_items.append((result, 0.0))
 
-                if items_added >= max_items_per_feed:
-                    break
+            # Sort by relevance if keyword matching was applied
+            if require_keyword_match and topic:
+                feed_items.sort(key=lambda x: x[1], reverse=True)
 
-            logger.info(f"Added {items_added} items from {feed_name}")
+            # Apply return_top_n limit if specified
+            if return_top_n:
+                feed_items = feed_items[:return_top_n]
+
+            # Extract results (without scores)
+            feed_results_only = [item[0] for item in feed_items]
+            results.extend(feed_results_only)
+
+            logger.info(f"Added {len(feed_results_only)} items from {feed_name}")
 
         logger.info(f"Total RSS items fetched: {len(results)}")
         return results
@@ -289,6 +404,7 @@ class RSSFeedReader:
         """Fetch RSS items relevant to a specific topic.
 
         Uses keyword matching to filter items by relevance.
+        Leverages per-feed configuration for smart filtering.
 
         Args:
             topic: Research topic
@@ -300,30 +416,18 @@ class RSSFeedReader:
         """
         logger.info(f"Fetching RSS feeds for topic: {topic}")
 
-        # Fetch all recent items
+        # Use fetch_recent with topic-based filtering
+        # This automatically handles per-feed configuration
         all_items = await self.fetch_recent(
             days=days,
-            priority_filter="high"  # Focus on high-priority feeds for topic matching
+            priority_filter=None,  # Fetch all priorities, per-feed config handles filtering
+            topic=topic  # Pass topic for keyword matching
         )
 
-        # Extract keywords from topic (simple approach)
-        topic_lower = topic.lower()
-        keywords = set(topic_lower.split())
-
-        # Filter by relevance (simple keyword matching)
-        relevant_items = []
-        for item in all_items:
-            # Check if any keyword appears in title or snippet
-            title_lower = item.title.lower()
-            snippet_lower = item.snippet.lower()
-
-            if any(keyword in title_lower or keyword in snippet_lower for keyword in keywords):
-                relevant_items.append(item)
-
-        logger.info(f"Found {len(relevant_items)} relevant items for topic: {topic}")
+        logger.info(f"Found {len(all_items)} relevant items for topic: {topic}")
 
         # Return top N most recent
-        return relevant_items[:max_items]
+        return all_items[:max_items]
 
     @classmethod
     def get_available_feeds(cls) -> Dict[str, Dict[str, str]]:
