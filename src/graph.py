@@ -10,6 +10,7 @@ from src.state import ResearchState
 from src.agents import ResearchPlanner, ResearchSearcher, ResearchSynthesizer, ReportWriter, ResearchCritic
 from src.utils.cache import ResearchCache
 from src.utils.quality_checks import QualityValidator
+from src.utils.report_validator import ReportValidator
 from src.utils.telemetry import get_telemetry
 from src.config import config
 import logging
@@ -32,6 +33,7 @@ def create_research_graph():
     writer = ReportWriter(citation_style=config.citation_style)
     critic = ResearchCritic()
     quality_validator = QualityValidator()
+    report_validator = ReportValidator()
     telemetry = get_telemetry()
 
     # Wrapper functions to handle model unloading between stages with telemetry
@@ -150,7 +152,7 @@ def create_research_graph():
         return result
 
     async def validate_quality(state: ResearchState) -> dict:
-        """Validate report quality."""
+        """Validate report quality and integrity."""
         if not state.final_report:
             logger.warning("No report to validate")
             return {}
@@ -158,7 +160,49 @@ def create_research_graph():
         telemetry.log_agent_start("quality_validator")
         start_time = time.time()
 
-        # Run quality validation
+        # Step 1: Report integrity validation (citations, output sanitization)
+        logger.info("Running report integrity validation...")
+        try:
+            integrity_results = report_validator.validate_report(
+                report_text=state.final_report,
+                sources=state.search_results,
+                auto_sanitize=True,
+                strict_citations=False  # Don't raise errors, just warn
+            )
+
+            # Update report with cleaned version if artifacts were removed
+            cleaned_report = integrity_results['cleaned_report']
+            if integrity_results['artifacts_removed']:
+                logger.warning("⚠️ Debug artifacts found and removed from report")
+                state.final_report = cleaned_report
+
+            # Log integrity issues
+            if not integrity_results['citation_valid']:
+                logger.error("❌ Citation integrity check FAILED:")
+                for issue in integrity_results['citation_issues']:
+                    logger.error(f"    {issue}")
+
+            if integrity_results['source_warnings']:
+                logger.warning("⚠️ Source mention warnings:")
+                for warning in integrity_results['source_warnings']:
+                    logger.warning(f"    {warning}")
+
+            # If we have phantom citations, try to fix them
+            if not integrity_results['citation_valid']:
+                logger.warning("Attempting to fix phantom citations...")
+                fixed_report = report_validator.fix_phantom_citations(
+                    cleaned_report,
+                    state.search_results
+                )
+                state.final_report = fixed_report
+                logger.info("✅ Phantom citations removed")
+
+        except Exception as e:
+            logger.error(f"Report integrity validation failed: {e}")
+            # Continue with quality validation even if integrity check fails
+
+        # Step 2: Content quality validation
+        logger.info("Running content quality validation...")
         validation_results = await quality_validator.validate_report(
             report=state.final_report,
             sources=state.search_results,
