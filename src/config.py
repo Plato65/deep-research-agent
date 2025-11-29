@@ -140,6 +140,27 @@ class ResearchConfig(BaseModel):
         description="Model for writing agent (defaults to model_name if not set)"
     )
 
+    # NEW: Specialized Model Configuration (DR Tulu & OLMo)
+    use_dr_tulu_writer: bool = Field(
+        default=os.getenv("USE_DR_TULU_WRITER", "false").lower() == "true",
+        description="Use DR Tulu-8B for report writing (88.6% citation precision)"
+    )
+
+    dr_tulu_endpoint: str = Field(
+        default=os.getenv("DR_TULU_ENDPOINT", "http://localhost:30001/v1"),
+        description="DR Tulu VLLM server endpoint"
+    )
+
+    use_olmo_critic: bool = Field(
+        default=os.getenv("USE_OLMO_CRITIC", "false").lower() == "true",
+        description="Use OLMo 3 32B Think for enhanced research critique"
+    )
+
+    olmo_endpoint: str = Field(
+        default=os.getenv("OLMO_ENDPOINT", "http://localhost:30002/v1"),
+        description="OLMo 3 32B Think VLLM server endpoint"
+    )
+
     # Search Configuration
     max_search_queries: int = Field(
         default=int(os.getenv("MAX_SEARCH_QUERIES", "5")),

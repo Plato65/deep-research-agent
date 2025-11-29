@@ -15,6 +15,13 @@ from src.utils.telemetry import get_telemetry
 from src.config import config
 import logging
 
+# Conditionally import specialized models
+if config.use_dr_tulu_writer:
+    from src.agents.dr_tulu_writer import DRTuluReportWriter
+
+if config.use_olmo_critic:
+    from src.agents.olmo_thinker import OLMoThinker
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -30,8 +37,23 @@ def create_research_graph():
     planner = ResearchPlanner()
     searcher = ResearchSearcher()
     synthesizer = ResearchSynthesizer()
-    writer = ReportWriter(citation_style=config.citation_style)
-    critic = ResearchCritic()
+
+    # Use specialized models if configured
+    if config.use_dr_tulu_writer:
+        logger.info("🚀 Using DR Tulu-8B for report writing (88.6% citation precision)")
+        writer = DRTuluReportWriter(
+            endpoint=config.dr_tulu_endpoint,
+            citation_style=config.citation_style
+        )
+    else:
+        writer = ReportWriter(citation_style=config.citation_style)
+
+    if config.use_olmo_critic:
+        logger.info("🧠 Using OLMo 3 32B Think for enhanced research critique")
+        critic = OLMoThinker(endpoint=config.olmo_endpoint)
+    else:
+        critic = ResearchCritic()
+
     quality_validator = QualityValidator()
     report_validator = ReportValidator()
     telemetry = get_telemetry()
