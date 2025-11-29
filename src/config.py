@@ -497,9 +497,12 @@ class ResearchConfig(BaseModel):
 
         # Privacy mode enforcement
         if mode == 'privacy':
-            if mode_config.get('force_local_models') and os.getenv('MODEL_PROVIDER') != 'ollama':
-                logger.warning("Privacy mode requires local models - forcing MODEL_PROVIDER=ollama")
-                self.model_provider = 'ollama'
+            if mode_config.get('force_local_models'):
+                # Allow both Ollama and LM Studio for local models
+                if self.model_provider not in ['ollama', 'lmstudio']:
+                    logger.warning("Privacy mode requires local models - set MODEL_PROVIDER to 'ollama' or 'lmstudio'")
+                    # Default to lmstudio if available, otherwise ollama
+                    self.model_provider = 'lmstudio'
             if mode_config.get('disable_api_search'):
                 self.enable_reddit_search = False
                 self.enable_hackernews_search = False  # If they require API keys
