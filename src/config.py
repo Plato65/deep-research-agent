@@ -261,6 +261,32 @@ class ResearchConfig(BaseModel):
         description="Minimum words per section"
     )
 
+    max_sources_per_report: int = Field(
+        default=int(os.getenv("MAX_SOURCES_PER_REPORT", "20")),
+        description="Maximum number of sources to include in final report"
+    )
+
+    max_findings_display: int = Field(
+        default=int(os.getenv("MAX_FINDINGS_DISPLAY", "20")),
+        description="Maximum number of findings to display in critique"
+    )
+
+    max_rss_items: int = Field(
+        default=int(os.getenv("MAX_RSS_ITEMS", "20")),
+        description="Maximum RSS feed items to fetch per source"
+    )
+
+    # Quality Control Configuration
+    max_refinement_iterations: int = Field(
+        default=int(os.getenv("MAX_REFINEMENT_ITERATIONS", "2")),
+        description="Maximum number of refinement loops for quality improvement"
+    )
+
+    quality_refinement_threshold: int = Field(
+        default=int(os.getenv("QUALITY_REFINEMENT_THRESHOLD", "70")),
+        description="Quality score threshold (0-100) to trigger refinement. Scores below this trigger another iteration."
+    )
+
     # Citation Configuration
     citation_style: str = Field(
         default=os.getenv("CITATION_STYLE", "apa"),

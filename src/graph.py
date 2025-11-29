@@ -25,9 +25,8 @@ if config.use_olmo_critic:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Self-correction loop configuration
-MAX_REFINEMENT_ITERATIONS = 2  # Maximum number of times to refine research
-QUALITY_THRESHOLD = 70  # Minimum quality score to proceed without refinement
+# Self-correction loop configuration now in config
+# MAX_REFINEMENT_ITERATIONS and QUALITY_THRESHOLD moved to config.py
 
 
 def create_research_graph():
@@ -341,13 +340,13 @@ def create_research_graph():
         should_refine = quality_score.get("should_refine", False)
 
         # Check if we've exceeded max iterations
-        if state.iterations >= MAX_REFINEMENT_ITERATIONS:
-            logger.info(f"Max iterations ({MAX_REFINEMENT_ITERATIONS}) reached - proceeding to report")
+        if state.iterations >= config.max_refinement_iterations:
+            logger.info(f"Max iterations ({config.max_refinement_iterations}) reached - proceeding to report")
             return "write_report"
 
         # Check if refinement is needed
-        if should_refine and overall_score < QUALITY_THRESHOLD:
-            logger.warning(f"Quality insufficient ({overall_score}/100) - iteration {state.iterations + 1}/{MAX_REFINEMENT_ITERATIONS}")
+        if should_refine and overall_score < config.quality_refinement_threshold:
+            logger.warning(f"Quality insufficient ({overall_score}/100) - iteration {state.iterations + 1}/{config.max_refinement_iterations}")
             logger.info("Looping back to search with critic feedback")
 
             # Increment iterations counter

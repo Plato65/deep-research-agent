@@ -324,7 +324,7 @@ class ResearchSearcher:
                 rss_results = await rss_reader.fetch_by_topic(
                     topic=state.research_topic,
                     days=config.rss_feed_days,
-                    max_items=20  # Limit total RSS items
+                    max_items=config.max_rss_items
                 )
 
                 logger.info(f"Fetched {len(rss_results)} relevant RSS items")
@@ -955,7 +955,7 @@ class ReportWriter:
         seen_urls = set()
 
         if state.search_results:
-            for i, result in enumerate(state.search_results[:20]):  # Top 20 sources
+            for i, result in enumerate(state.search_results[:config.max_sources_per_report]):
                 if hasattr(result, 'url') and result.url and result.url not in seen_urls:
                     seen_urls.add(result.url)
                     master_sources.append(result)
@@ -1155,7 +1155,7 @@ Key Findings:
 {chr(10).join(f"- {f}" for f in findings)}
 
 AVAILABLE SOURCES (cite these by number - references will be added at the end):
-{chr(10).join(f"[{i+1}] {r.title}" + chr(10) + f"    URL: {r.url}" + chr(10) + f"    Snippet: {r.snippet[:200]}..." for i, r in enumerate(search_results[:20]))}
+{chr(10).join(f"[{i+1}] {r.title}" + chr(10) + f"    URL: {r.url}" + chr(10) + f"    Snippet: {r.snippet[:200]}..." for i, r in enumerate(search_results[:config.max_sources_per_report]))}
 
 CRITICAL INSTRUCTIONS FOR CITATIONS:
 1. The source list above contains sources numbered [1] through [{num_sources}]
@@ -1421,7 +1421,7 @@ Evaluate this research and provide your critique in JSON format.""")
 
         # Format objectives and findings for prompt
         objectives_text = "\n".join([f"{i+1}. {obj}" for i, obj in enumerate(objectives)]) if objectives else "No objectives specified"
-        findings_text = "\n".join([f"- {finding}" for finding in findings[:20]]) if findings else "No findings extracted"  # Limit to first 20 to avoid token limits
+        findings_text = "\n".join([f"- {finding}" for finding in findings[:config.max_findings_display]]) if findings else "No findings extracted"
 
         for attempt in range(self.max_retries):
             try:

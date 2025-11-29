@@ -284,3 +284,300 @@ def validate_url(url: str) -> Tuple[bool, str, Optional[str]]:
 def is_safe_url(url: str) -> bool:
     """Check if URL is safe - convenience wrapper."""
     return URLSanitizer.is_safe_url(url)
+
+
+class ResearchStateValidator:
+    """Validates ResearchState objects for agent operations."""
+
+    @staticmethod
+    def validate_state_for_search(state) -> Tuple[bool, Optional[str]]:
+        """Validate state has required fields for search operation.
+
+        Args:
+            state: ResearchState to validate
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        # Validate topic
+        valid, _, error = InputValidator.sanitize_research_topic(state.research_topic)
+        if not valid:
+            return False, error
+
+        # Validate plan exists
+        if not state.plan:
+            return False, "No research plan available - cannot perform search"
+
+        # Validate plan has search queries
+        if not hasattr(state.plan, 'search_queries') or not state.plan.search_queries:
+            return False, "Research plan missing search queries"
+
+        if len(state.plan.search_queries) == 0:
+            return False, "Research plan has zero search queries"
+
+        return True, None
+
+    @staticmethod
+    def validate_state_for_synthesis(state) -> Tuple[bool, Optional[str]]:
+        """Validate state has required fields for synthesis operation.
+
+        Args:
+            state: ResearchState to validate
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        if not state.research_topic:
+            return False, "Missing research topic"
+
+        if not state.search_results:
+            return False, "No search results available for synthesis"
+
+        if len(state.search_results) == 0:
+            return False, "Search results list is empty"
+
+        return True, None
+
+    @staticmethod
+    def validate_state_for_writing(state) -> Tuple[bool, Optional[str]]:
+        """Validate state has required fields for report writing.
+
+        Args:
+            state: ResearchState to validate
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        if not state.research_topic:
+            return False, "Missing research topic"
+
+        if not state.plan:
+            return False, "Missing research plan"
+
+        if not state.key_findings:
+            return False, "Missing key findings - cannot write report"
+
+        if not state.search_results:
+            return False, "Missing search results for citations"
+
+        return True, None
+
+
+class SearchResultValidator:
+    """Validates search results."""
+
+    @staticmethod
+    def validate_single_result(result, index: Optional[int] = None) -> Tuple[bool, Optional[str]]:
+        """Validate a single search result.
+
+        Args:
+            result: SearchResult to validate
+            index: Optional index for error reporting
+
+        Returns:
+            Tuple of (is_valid, error_message)
+
+        Checks:
+        - Has url attribute
+        - Has title attribute
+        - URL is valid
+        - Title is not empty
+        """
+        prefix = f"Result {index}: " if index is not None else ""
+
+        # Check required attributes
+        if not hasattr(result, 'url'):
+            return False, f"{prefix}Missing 'url' attribute"
+
+        if not hasattr(result, 'title'):
+            return False, f"{prefix}Missing 'title' attribute"
+
+        # Validate URL
+        valid, _, error = InputValidator.sanitize_url(result.url)
+        if not valid:
+            return False, f"{prefix}{error}"
+
+        # Validate title
+        if not result.title or not result.title.strip():
+            return False, f"{prefix}Title is empty"
+
+        return True, None
+
+    @staticmethod
+    def validate_results_batch(
+        results: list,
+        check_duplicates: bool = True,
+        min_results: int = 1
+    ) -> Tuple[bool, list]:
+        """Validate a batch of search results.
+
+        Args:
+            results: List of SearchResult objects to validate
+            check_duplicates: Whether to check for duplicate URLs
+            min_results: Minimum number of results required
+
+        Returns:
+            Tuple of (is_valid, list_of_errors)
+            Empty error list if valid
+
+        Checks:
+        - List is not empty (if min_results > 0)
+        - Each result is valid
+        - No duplicate URLs (if check_duplicates=True)
+        - Meets minimum result count
+        """
+        errors = []
+
+        # Check if list exists and meets minimum
+        if not results:
+            if min_results > 0:
+                errors.append(f"Results list is empty (minimum {min_results} required)")
+            return len(errors) == 0, errors
+
+        if len(results) < min_results:
+            errors.append(
+                f"Insufficient results: {len(results)} found, {min_results} required"
+            )
+
+        # Validate each result
+        seen_urls = set()
+        for i, result in enumerate(results):
+            valid, error = SearchResultValidator.validate_single_result(result, index=i)
+            if not valid:
+                errors.append(error)
+                continue
+
+            # Check for duplicates
+            if check_duplicates and hasattr(result, 'url'):
+                if result.url in seen_urls:
+                    errors.append(f"Result {i}: Duplicate URL: {result.url}")
+                seen_urls.add(result.url)
+
+        return len(errors) == 0, errors
+
+
+class ConfigurationValidator:
+    """Validates configuration settings."""
+
+    @staticmethod
+    def validate_model_config(config) -> list:
+        """Validate model configuration.
+
+        Args:
+            config: Configuration object to validate
+
+        Returns:
+            List of warning messages (empty if no issues)
+        """
+        warnings = []
+
+        # Check provider-specific requirements
+        if config.model_provider == "openai":
+            if not config.openai_api_key or config.openai_api_key == "your-api-key-here":
+                warnings.append("OpenAI provider selected but no valid API key configured")
+
+        elif config.model_provider == "anthropic":
+            if not config.anthropic_api_key or config.anthropic_api_key == "your-api-key-here":
+                warnings.append("Anthropic provider selected but no valid API key configured")
+
+        elif config.model_provider == "gemini":
+            if not config.gemini_api_key or config.gemini_api_key == "your-api-key-here":
+                warnings.append("Gemini provider selected but no valid API key configured")
+
+        elif config.model_provider == "ollama":
+            if not config.ollama_base_url:
+                warnings.append("Ollama provider selected but no base URL configured")
+
+        elif config.model_provider == "lmstudio":
+            if not config.lmstudio_base_url:
+                warnings.append("LM Studio provider selected but no base URL configured")
+
+        # Check specialized model configs
+        if config.use_dr_tulu_writer:
+            if not config.dr_tulu_endpoint:
+                warnings.append("DR Tulu writer enabled but no endpoint configured")
+            if not config.dr_tulu_model_name and config.model_provider == "lmstudio":
+                warnings.append(
+                    "DR Tulu writer with LM Studio requires dr_tulu_model_name to be set"
+                )
+
+        if config.use_olmo_critic:
+            if not config.olmo_endpoint:
+                warnings.append("OLMo critic enabled but no endpoint configured")
+            if not config.olmo_model_name and config.model_provider == "lmstudio":
+                warnings.append(
+                    "OLMo critic with LM Studio requires olmo_model_name to be set"
+                )
+
+        return warnings
+
+    @staticmethod
+    def validate_search_config(config) -> list:
+        """Validate search configuration.
+
+        Args:
+            config: Configuration object to validate
+
+        Returns:
+            List of warning messages (empty if no issues)
+        """
+        warnings = []
+
+        # Check Reddit config
+        if config.enable_reddit_search:
+            if not config.reddit_client_id or not config.reddit_client_secret:
+                warnings.append(
+                    "Reddit search enabled but credentials not configured. "
+                    "Set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET or disable with "
+                    "ENABLE_REDDIT_SEARCH=false"
+                )
+
+        # Check RSS config
+        if config.enable_rss_feeds:
+            if not config.enabled_rss_feeds and not config.custom_rss_feeds:
+                warnings.append(
+                    "RSS feeds enabled but no feeds configured. "
+                    "Will use default priority filter: " +
+                    (config.rss_priority_filter or "all")
+                )
+
+        # Check search API availability
+        has_search_api = any([
+            config.serper_api_key and config.serper_api_key != "your-api-key-here",
+            config.tavily_api_key and config.tavily_api_key != "your-api-key-here",
+            config.brave_api_key and config.brave_api_key != "your-api-key-here",
+            config.enable_duckduckgo_search
+        ])
+
+        if not has_search_api:
+            warnings.append(
+                "No search API configured. Please set at least one: "
+                "SERPER_API_KEY, TAVILY_API_KEY, BRAVE_API_KEY, or enable DuckDuckGo"
+            )
+
+        return warnings
+
+
+def validate_json_structure(data, expected_keys: list) -> Tuple[bool, Optional[str]]:
+    """Validate JSON structure has expected keys.
+
+    Args:
+        data: Parsed JSON data
+        expected_keys: List of keys that must be present
+
+    Returns:
+        Tuple of (is_valid, error_message)
+
+    Example:
+        >>> validate_json_structure({"foo": 1}, ["foo", "bar"])
+        (False, "Missing required keys: bar")
+    """
+    if not isinstance(data, dict):
+        return False, f"Expected dict, got {type(data).__name__}"
+
+    missing_keys = [key for key in expected_keys if key not in data]
+
+    if missing_keys:
+        return False, f"Missing required keys: {', '.join(missing_keys)}"
+
+    return True, None
