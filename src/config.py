@@ -148,7 +148,12 @@ class ResearchConfig(BaseModel):
 
     dr_tulu_endpoint: str = Field(
         default=os.getenv("DR_TULU_ENDPOINT", "http://localhost:30001/v1"),
-        description="DR Tulu VLLM server endpoint"
+        description="DR Tulu VLLM/LM Studio server endpoint (default VLLM: 30001, LM Studio: 1234)"
+    )
+
+    dr_tulu_model_name: Optional[str] = Field(
+        default=os.getenv("DR_TULU_MODEL_NAME", None),
+        description="DR Tulu model identifier (auto-detect if not specified, needed for LM Studio)"
     )
 
     use_olmo_critic: bool = Field(
@@ -158,7 +163,12 @@ class ResearchConfig(BaseModel):
 
     olmo_endpoint: str = Field(
         default=os.getenv("OLMO_ENDPOINT", "http://localhost:30002/v1"),
-        description="OLMo 3 32B Think VLLM server endpoint"
+        description="OLMo 3 32B Think VLLM/LM Studio server endpoint"
+    )
+
+    olmo_model_name: Optional[str] = Field(
+        default=os.getenv("OLMO_MODEL_NAME", None),
+        description="OLMo model identifier (auto-detect if not specified, needed for LM Studio)"
     )
 
     # Search Configuration

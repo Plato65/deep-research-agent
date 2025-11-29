@@ -22,24 +22,28 @@ logger = logging.getLogger(__name__)
 class DRTuluReportWriter:
     """Report writer using DR Tulu-8B for improved citation accuracy."""
 
-    def __init__(self, endpoint: str = "http://localhost:30001/v1", citation_style: str = None):
+    def __init__(self, endpoint: str = "http://localhost:30001/v1", citation_style: str = None, model_name: str = None):
         """Initialize DR Tulu writer.
 
         Args:
-            endpoint: VLLM server endpoint (default: http://localhost:30001/v1)
+            endpoint: VLLM/LM Studio server endpoint (default: http://localhost:30001/v1)
             citation_style: Citation style (not used - DR Tulu handles citations)
+            model_name: Model identifier (default: auto-detect or use config)
         """
         self.endpoint = endpoint
         self.citation_style = citation_style or config.citation_style
         self.max_retries = config.max_retries
 
-        # Use async OpenAI client for VLLM
+        # Model name: Allow override, fall back to config, or use default
+        self.model_name = model_name or getattr(config, 'dr_tulu_model_name', None) or "rl-research/DR-Tulu-8B"
+
+        # Use async OpenAI client for VLLM/LM Studio
         self.client = AsyncOpenAI(
             base_url=endpoint,
-            api_key="dummy"  # VLLM doesn't require real API key
+            api_key="dummy"  # VLLM/LM Studio don't require real API key
         )
 
-        logger.info(f"DRTuluReportWriter initialized (endpoint: {endpoint})")
+        logger.info(f"DRTuluReportWriter initialized (endpoint: {endpoint}, model: {self.model_name})")
 
     def _format_sources_with_ids(self, search_results: List[SearchResult]) -> str:
         """Format sources with explicit SOURCE_N IDs for DR Tulu.
@@ -171,7 +175,7 @@ I should:
 
         try:
             response = await self.client.chat.completions.create(
-                model="rl-research/DR-Tulu-8B",
+                model=self.model_name,  # Use configured model name (supports LM Studio)
                 messages=[
                     {
                         "role": "system",

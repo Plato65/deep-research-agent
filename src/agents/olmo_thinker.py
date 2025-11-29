@@ -23,22 +23,26 @@ logger = logging.getLogger(__name__)
 class OLMoThinker:
     """Research critic using OLMo 3 32B Think for enhanced reasoning."""
 
-    def __init__(self, endpoint: str = "http://localhost:30002/v1"):
+    def __init__(self, endpoint: str = "http://localhost:30002/v1", model_name: str = None):
         """Initialize OLMo thinker.
 
         Args:
-            endpoint: VLLM server endpoint (default: http://localhost:30002/v1)
+            endpoint: VLLM/LM Studio server endpoint (default: http://localhost:30002/v1)
+            model_name: Model identifier (default: auto-detect or use config)
         """
         self.endpoint = endpoint
         self.max_retries = config.max_retries
 
-        # Use async OpenAI client for VLLM
+        # Model name: Allow override, fall back to config, or use default
+        self.model_name = model_name or getattr(config, 'olmo_model_name', None) or "allenai/Olmo-3-32B-Think"
+
+        # Use async OpenAI client for VLLM/LM Studio
         self.client = AsyncOpenAI(
             base_url=endpoint,
-            api_key="dummy"  # VLLM doesn't require real API key
+            api_key="dummy"  # VLLM/LM Studio don't require real API key
         )
 
-        logger.info(f"OLMoThinker initialized (endpoint: {endpoint})")
+        logger.info(f"OLMoThinker initialized (endpoint: {endpoint}, model: {self.model_name})")
 
     def _create_critique_prompt(self, state: ResearchState) -> str:
         """Create critique prompt for OLMo Think.
@@ -155,7 +159,7 @@ If overall_score < 70, you MUST provide specific recommended_queries to address 
 
                 # OLMo 3 32B Think parameters (from model card)
                 response = await self.client.chat.completions.create(
-                    model="allenai/Olmo-3-32B-Think",
+                    model=self.model_name,  # Use configured model name (supports LM Studio)
                     messages=[
                         {
                             "role": "system",
