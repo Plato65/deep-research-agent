@@ -15,7 +15,7 @@ from openai import AsyncOpenAI
 
 from src.state import ResearchState
 from src.config import config
-from src.utils.tokens import estimate_tokens
+from src.llm_tracker import estimate_tokens
 
 logger = logging.getLogger(__name__)
 
