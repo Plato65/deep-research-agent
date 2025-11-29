@@ -185,7 +185,7 @@ Create a detailed research plan in JSON format:
                 call_detail = {
                     'agent': 'ResearchPlanner',
                     'operation': 'plan',
-                    'model': config.model_name,
+                    'model': self.model_name,  # Use actual model (stage-specific)
                     'input_tokens': input_tokens,
                     'output_tokens': output_tokens,
                     'duration': round(duration, 2),
@@ -513,7 +513,7 @@ Begin your research. Use the tools to gather comprehensive information."""
                 call_detail = {
                     'agent': 'ResearchSearcher',
                     'operation': 'autonomous_search',
-                    'model': config.model_name,
+                    'model': self.model_name,  # Use actual model (stage-specific)
                     'input_tokens': input_tokens,
                     'output_tokens': output_tokens,
                     'duration': round(duration, 2),
@@ -824,7 +824,7 @@ Please analyze these search results and extract key findings. You may use the ex
                 call_detail = {
                     'agent': 'ResearchSynthesizer',
                     'operation': 'autonomous_synthesis',
-                    'model': config.summarization_model,
+                    'model': self.model_name,  # Use actual model (stage-specific)
                     'input_tokens': input_tokens,
                     'output_tokens': output_tokens,
                     'duration': round(duration, 2),
@@ -1207,7 +1207,7 @@ Write a comprehensive, well-researched section using inline citations [1] throug
             call_detail = {
                 'agent': 'ReportWriter',
                 'operation': f'write_section_{section_title[:30]}',
-                'model': config.model_name,
+                'model': self.model_name,  # Use actual model (stage-specific)
                 'input_tokens': input_tokens,
                 'output_tokens': output_tokens,
                 'duration': round(duration, 2)
