@@ -59,7 +59,7 @@ class BaseResearchAgent(ABC):
         logger.info(f"Loading {self.__class__.__name__} LLM: {self.model_name}")
 
         # Import here to avoid circular dependency
-        from src.agents import get_llm
+        from src.core_agents import get_llm
 
         self.llm = get_llm(
             temperature=temperature,
