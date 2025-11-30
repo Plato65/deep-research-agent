@@ -39,7 +39,14 @@ def create_research_graph():
 
     # Use specialized models if configured
     if config.use_dr_tulu_writer:
-        logger.info("🚀 Using DR Tulu-8B for report writing (88.6% citation precision)")
+        logger.info(
+            "Using specialized writer: DR Tulu-8B",
+            extra={
+                'agent': 'DRTuluReportWriter',
+                'citation_precision': '88.6%',
+                'endpoint': config.dr_tulu_endpoint
+            }
+        )
         writer = DRTuluReportWriter(
             endpoint=config.dr_tulu_endpoint,
             citation_style=config.citation_style
@@ -48,7 +55,14 @@ def create_research_graph():
         writer = ReportWriter(citation_style=config.citation_style)
 
     if config.use_olmo_critic:
-        logger.info("🧠 Using OLMo 3 32B Think for enhanced research critique")
+        logger.info(
+            "Using specialized critic: OLMo 3 32B Think",
+            extra={
+                'agent': 'OLMoThinker',
+                'capabilities': 'enhanced_reasoning',
+                'endpoint': config.olmo_endpoint
+            }
+        )
         critic = OLMoThinker(endpoint=config.olmo_endpoint)
     else:
         critic = ResearchCritic()
@@ -194,17 +208,32 @@ def create_research_graph():
             # Update report with cleaned version if artifacts were removed
             cleaned_report = integrity_results['cleaned_report']
             if integrity_results['artifacts_removed']:
-                logger.warning("⚠️ Debug artifacts found and removed from report")
+                logger.warning(
+                    "Debug artifacts found and removed from report",
+                    extra={'validation_step': 'clean_debug_artifacts'}
+                )
                 state.final_report = cleaned_report
 
             # Log integrity issues
             if not integrity_results['citation_valid']:
-                logger.error("❌ Citation integrity check FAILED:")
+                logger.error(
+                    "Citation integrity check failed",
+                    extra={
+                        'validation_step': 'check_citation_integrity',
+                        'issues': integrity_results['citation_issues']
+                    }
+                )
                 for issue in integrity_results['citation_issues']:
                     logger.error(f"    {issue}")
 
             if integrity_results['source_warnings']:
-                logger.warning("⚠️ Source mention warnings:")
+                logger.warning(
+                    "Source mention warnings detected",
+                    extra={
+                        'validation_step': 'check_source_mentions',
+                        'warnings': integrity_results['source_warnings']
+                    }
+                )
                 for warning in integrity_results['source_warnings']:
                     logger.warning(f"    {warning}")
 
@@ -216,7 +245,10 @@ def create_research_graph():
                     state.search_results
                 )
                 state.final_report = fixed_report
-                logger.info("✅ Phantom citations removed")
+                logger.info(
+                    "Phantom citations removed",
+                    extra={'validation_step': 'remove_phantom_citations'}
+                )
 
         except Exception as e:
             logger.error(f"Report integrity validation failed: {e}")

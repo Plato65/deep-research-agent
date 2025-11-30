@@ -265,12 +265,18 @@ class ReportValidator:
 
         # Log summary
         if valid:
-            logger.info("✅ Report validation passed")
+            logger.info(
+                "Report validation passed",
+                extra={'validation_result': 'success'}
+            )
         else:
             logger.warning(
-                f"⚠️ Report validation issues: "
-                f"{len(citation_issues)} citation issues, "
-                f"{len(source_warnings)} source warnings"
+                "Report validation issues detected",
+                extra={
+                    'validation_result': 'issues_found',
+                    'citation_issues_count': len(citation_issues),
+                    'source_warnings_count': len(source_warnings)
+                }
             )
 
         return result

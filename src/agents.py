@@ -936,22 +936,16 @@ class ReportWriter:
                 logger.debug(f"Could not unload model: {e}")
             self.llm = None
         
-    async def write_report(self, state: ResearchState) -> dict:
-        """Write the final research report with validation and retry.
+    def _build_master_source_list(self, state: ResearchState) -> tuple:
+        """Build master source list for consistent citation numbering.
 
-        Returns dict with report data that LangGraph will merge into state.
+        Returns:
+            Tuple of (master_sources, master_source_info) where:
+            - master_sources: List of SearchResult objects
+            - master_source_info: List of dicts with url, title, date, number
         """
-        self._ensure_llm_loaded()  # Lazy load LLM
-
-        logger.info("Writing final report")
-
-        if not state.plan or not state.key_findings:
-            return {"error": "Insufficient data for report generation"}
-
-        # CREATE MASTER SOURCE LIST FIRST - prevents citation numbering mismatches
-        # Build a single numbered source list that ALL sections will use
         master_sources = []
-        master_source_info = []  # For References section
+        master_source_info = []
         seen_urls = set()
 
         if state.search_results:
@@ -959,118 +953,243 @@ class ReportWriter:
                 if hasattr(result, 'url') and result.url and result.url not in seen_urls:
                     seen_urls.add(result.url)
                     master_sources.append(result)
+
                     # Store info for References section
                     title = getattr(result, 'title', '')
                     cred_info = state.credibility_scores[i] if state.credibility_scores and i < len(state.credibility_scores) else {}
                     date = ''
                     if 'recency' in cred_info and 'date' in cred_info['recency']:
                         date = cred_info['recency']['date']
+
                     master_source_info.append({
                         'url': result.url,
                         'title': title,
                         'date': date,
-                        'number': len(master_sources)  # 1-indexed
+                        'number': len(master_sources)
                     })
 
-        logger.info(f"Created master source list with {len(master_sources)} sources for consistent citation numbering")
+        logger.info(f"Created master source list with {len(master_sources)} sources")
+        return master_sources, master_source_info
 
-        # Track total LLM calls for report generation
-        report_llm_calls = 0
-        report_input_tokens = 0
-        report_output_tokens = 0
-        report_call_details = []
-        
+    async def _generate_all_sections(
+        self,
+        state: ResearchState,
+        master_sources: list
+    ) -> tuple:
+        """Generate all report sections using master source list.
+
+        Args:
+            state: Current research state with plan and findings
+            master_sources: Master source list for consistent citations
+
+        Returns:
+            Tuple of (report_sections, llm_calls, input_tokens, output_tokens, call_details)
+        """
+        report_sections = []
+        llm_calls = 0
+        input_tokens = 0
+        output_tokens = 0
+        call_details = []
+
+        for section_title in state.plan.report_outline:
+            section, section_tokens = await self._write_section(
+                state.research_topic,
+                section_title,
+                state.key_findings,
+                master_sources
+            )
+
+            if section:
+                report_sections.append(section)
+
+                if section_tokens:
+                    llm_calls += 1
+                    input_tokens += section_tokens['input_tokens']
+                    output_tokens += section_tokens['output_tokens']
+                    call_details.append(section_tokens)
+
+        if not report_sections:
+            raise ValueError("No report sections generated")
+
+        return report_sections, llm_calls, input_tokens, output_tokens, call_details
+
+    def _finalize_report(
+        self,
+        state: ResearchState,
+        report_sections: list,
+        master_source_info: list
+    ) -> str:
+        """Compile and finalize report with citations and credibility info.
+
+        Args:
+            state: Current research state
+            report_sections: Generated report sections
+            master_source_info: Source information for References
+
+        Returns:
+            Final report string with formatted citations
+        """
+        # Create temporary state for compilation
+        temp_state = ResearchState(
+            research_topic=state.research_topic,
+            plan=state.plan,
+            report_sections=report_sections
+        )
+
+        # Compile final report
+        final_report = self._compile_report(temp_state, master_source_info)
+
+        # Format citations if available
+        if state.search_results:
+            final_report = self.citation_formatter.update_report_citations(
+                final_report,
+                style=self.citation_style,
+                search_results=state.search_results,
+                credibility_scores=state.credibility_scores
+            )
+
+            # Verify citation relevance
+            citation_warnings = self.citation_formatter.verify_citation_relevance(
+                final_report,
+                search_results=state.search_results
+            )
+
+            if citation_warnings:
+                logger.warning(
+                    f"Found {len(citation_warnings)} potential citation mismatches",
+                    extra={'warnings_count': len(citation_warnings)}
+                )
+                for warning in citation_warnings[:5]:
+                    logger.warning(
+                        f"Citation mismatch: [{warning['citation']}] {warning['source_title']}",
+                        extra={'claim_preview': warning['claim'][:80]}
+                    )
+
+        # Add credibility information
+        if state.credibility_scores:
+            high_cred_sources = [
+                i+1 for i, score in enumerate(state.credibility_scores)
+                if score.get('level') == 'high'
+            ]
+            if high_cred_sources:
+                final_report += f"\n\n---\n\n**Note:** {len(high_cred_sources)} high-credibility sources were prioritized in this research."
+
+        return final_report
+
+    def _build_report_return_dict(
+        self,
+        state: ResearchState,
+        report_sections: list,
+        final_report: str,
+        llm_calls: int,
+        input_tokens: int,
+        output_tokens: int,
+        call_details: list
+    ) -> dict:
+        """Build return dictionary for LangGraph state update.
+
+        Args:
+            state: Current research state
+            report_sections: Generated sections
+            final_report: Finalized report
+            llm_calls: Number of LLM calls made
+            input_tokens: Total input tokens used
+            output_tokens: Total output tokens used
+            call_details: Detailed call information
+
+        Returns:
+            Dict with updates to merge into state
+        """
+        return {
+            "report_sections": report_sections,
+            "final_report": final_report,
+            "current_stage": "complete",
+            "iterations": state.iterations + 1,
+            "llm_calls": state.llm_calls + llm_calls,
+            "total_input_tokens": state.total_input_tokens + input_tokens,
+            "total_output_tokens": state.total_output_tokens + output_tokens,
+            "llm_call_details": state.llm_call_details + call_details
+        }
+
+    async def write_report(self, state: ResearchState) -> dict:
+        """Write the final research report with validation and retry.
+
+        Orchestrates the report writing process:
+        1. Builds master source list for consistent citations
+        2. Generates all report sections
+        3. Compiles and finalizes report with citations
+        4. Validates and returns result
+
+        Args:
+            state: Current research state with plan and findings
+
+        Returns:
+            Dict with report data that LangGraph will merge into state
+        """
+        self._ensure_llm_loaded()
+        logger.info("Writing final report")
+
+        # Validate input
+        if not state.plan or not state.key_findings:
+            return {"error": "Insufficient data for report generation"}
+
+        # Build master source list once for all sections
+        master_sources, master_source_info = self._build_master_source_list(state)
+
+        # Retry loop for report generation
         for attempt in range(self.max_retries):
             try:
-                # Generate each section with retry - using MASTER source list for consistency
-                report_sections = []
-                for section_title in state.plan.report_outline:
-                    section, section_tokens = await self._write_section(
-                        state.research_topic,
-                        section_title,
-                        state.key_findings,
-                        master_sources  # Use master list so all sections have same numbering
-                    )
-                    if section:
-                        report_sections.append(section)
-                        if section_tokens:
-                            report_llm_calls += 1
-                            report_input_tokens += section_tokens['input_tokens']
-                            report_output_tokens += section_tokens['output_tokens']
-                            report_call_details.append(section_tokens)
-                
-                # Validate minimum quality
-                if not report_sections:
-                    raise ValueError("No report sections generated")
-                
-                # Create temporary state for compilation
-                temp_state = ResearchState(
-                    research_topic=state.research_topic,
-                    plan=state.plan,
-                    report_sections=report_sections
+                # Generate all sections
+                report_sections, llm_calls, input_tokens, output_tokens, call_details = \
+                    await self._generate_all_sections(state, master_sources)
+
+                # Finalize report with citations and formatting
+                final_report = self._finalize_report(
+                    state,
+                    report_sections,
+                    master_source_info
                 )
 
-                # Compile final report with master source list for consistent References
-                final_report = self._compile_report(temp_state, master_source_info)
-                
-                # Format citations in specified style with dates
-                if state.search_results:
-                    final_report = self.citation_formatter.update_report_citations(
-                        final_report,
-                        style=self.citation_style,
-                        search_results=state.search_results,
-                        credibility_scores=state.credibility_scores
-                    )
-
-                    # Verify citation relevance and log warnings about potential mismatches
-                    citation_warnings = self.citation_formatter.verify_citation_relevance(
-                        final_report,
-                        search_results=state.search_results
-                    )
-                    if citation_warnings:
-                        logger.warning(f"Found {len(citation_warnings)} potential citation mismatches - review recommended")
-                        for warning in citation_warnings[:5]:  # Log first 5 warnings
-                            logger.warning(f"  [{warning['citation']}] {warning['source_title']}: {warning['claim'][:80]}...")
-
-                # Add credibility information to report if available
-                if state.credibility_scores:
-                    high_cred_sources = [
-                        i+1 for i, score in enumerate(state.credibility_scores)
-                        if score.get('level') == 'high'
-                    ]
-                    if high_cred_sources:
-                        final_report += f"\n\n---\n\n**Note:** {len(high_cred_sources)} high-credibility sources were prioritized in this research."
-                
-                # Validate report length
+                # Validate minimum quality
                 if len(final_report) < 500:
                     raise ValueError("Report too short - insufficient content")
-                
-                logger.info(f"Report generation complete: {len(final_report)} chars")
-                
-                # Return dict updates - LangGraph merges into state
-                return {
-                    "report_sections": report_sections,
-                    "final_report": final_report,
-                    "current_stage": "complete",
-                    "iterations": state.iterations + 1,
-                    "llm_calls": state.llm_calls + report_llm_calls,
-                    "total_input_tokens": state.total_input_tokens + report_input_tokens,
-                    "total_output_tokens": state.total_output_tokens + report_output_tokens,
-                    "llm_call_details": state.llm_call_details + report_call_details
-                }
-                
+
+                logger.info(
+                    f"Report generation complete",
+                    extra={
+                        'report_length': len(final_report),
+                        'sections_count': len(report_sections),
+                        'sources_count': len(master_sources)
+                    }
+                )
+
+                # Build and return state updates
+                return self._build_report_return_dict(
+                    state,
+                    report_sections,
+                    final_report,
+                    llm_calls,
+                    input_tokens,
+                    output_tokens,
+                    call_details
+                )
+
             except Exception as e:
-                logger.warning(f"Report attempt {attempt + 1} failed: {str(e)}")
+                logger.warning(
+                    f"Report generation attempt {attempt + 1}/{self.max_retries} failed",
+                    extra={'error': str(e), 'error_type': type(e).__name__}
+                )
+
                 if attempt == self.max_retries - 1:
                     logger.error(f"Report generation failed after {self.max_retries} attempts")
                     return {
                         "error": f"Report writing failed: {str(e)}",
                         "iterations": state.iterations + 1
                     }
-                else:
-                    await asyncio.sleep(2 ** attempt)
-        
-        # Fallback if all retries exhausted
+
+                await asyncio.sleep(2 ** attempt)
+
+        # Fallback (should not reach here)
         return {
             "error": "Report generation failed: Maximum retries exceeded",
             "iterations": state.iterations + 1
